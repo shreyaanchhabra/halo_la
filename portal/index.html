@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HALO Care Portal</title>
+  </head>
+  <body>
+    <header class="top">
+      <strong>HALO</strong>
+      <span>Care portal · Setup</span>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Patient</h2>
+        <label>Name <input id="patient-name" placeholder="e.g. Joe Martinez" /></label>
+      </section>
+
+      <section class="card">
+        <h2>People HALO should recognize</h2>
+        <p class="hint">Each person records a short voice sample so HALO can tell who is talking.</p>
+
+        <form id="person-form">
+          <div class="row">
+            <label>Name <input id="p-name" required placeholder="Maya" /></label>
+            <label>Relation <input id="p-relation" required placeholder="Granddaughter" /></label>
+          </div>
+          <label>About them <textarea id="p-blurb" rows="2" placeholder="Started at UCLA in September. Visits on weekends."></textarea></label>
+
+          <div class="recorder">
+            <p class="passage">Please read aloud: "Hi, it's me. I'm just stopping by to see how you're doing today. The weather is lovely, and I brought some of your favourite tea. Let's sit down and catch up for a while."</p>
+            <div class="rec-controls">
+              <button type="button" id="rec-btn">● Record voice</button>
+              <span id="rec-status" class="hint">No recording yet</span>
+            </div>
+            <audio id="rec-preview" controls hidden></audio>
+          </div>
+
+          <button type="submit" id="person-save">Save person</button>
+        </form>
+
+        <ul id="people" class="list"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Prescriptions</h2>
+        <p class="hint">Upload a photo or PDF of each prescription.</p>
+        <form id="rx-form">
+          <label>File <input id="rx-file" type="file" accept="image/*,application/pdf" required /></label>
+          <div class="row">
+            <label>Prescribed by <input id="rx-doctor" placeholder="Dr. Patel" /></label>
+            <label>Date <input id="rx-date" type="date" /></label>
+          </div>
+          <label>Notes <input id="rx-notes" placeholder="Donepezil 5 mg, once daily at night" /></label>
+          <button type="submit" id="rx-save">Upload prescription</button>
+        </form>
+        <ul id="prescriptions" class="list"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

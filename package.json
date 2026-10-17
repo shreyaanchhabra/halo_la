@@ -1,0 +1,24 @@
+{
+  "name": "halo-la",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "sim": "evenhub-simulator http://localhost:5173",
+    "qr": "evenhub qr --clear && evenhub qr --http --ip $(ipconfig getifaddr en0) --port 5173",
+    "pack": "npm run build && evenhub pack app.json dist",
+    "portal": "vite portal"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.14",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
+    "typescript": "~5.9",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.16"
+  }
+}

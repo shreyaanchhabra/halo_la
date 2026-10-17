@@ -1,0 +1,588 @@
+<title>HALO Pitch and Product Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with wide breakouts for tables, HUD mockups and flows. */
+:root {
+  --paper: #f3f6f7;
+  --surface: #ffffff;
+  --ink: #18242e;
+  --muted: #586874;
+  --rule: #d5dee3;
+  --accent: #23607d;
+  --accent-soft: #e2eef3;
+  --warn: #8a5a00;
+  --warn-soft: #fbf1dc;
+  --hud-bg: #050a07;
+  --hud-hi: #7dffa6;
+  --hud-mid: #3fbf6a;
+  --hud-lo: #1f6a3a;
+  --c-glasses: #23607d;
+  --c-phone: #5b4b8a;
+  --c-portal: #2f6b47;
+  --c-server: #6a5a3c;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --f-body: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f161b; --surface: #16212a; --ink: #e3ebef; --muted: #98a9b4; --rule: #2a3a45;
+    --accent: #7cc0dd; --accent-soft: #1b3341; --warn: #f0c46a; --warn-soft: #3a2e14;
+    --c-glasses: #7cc0dd; --c-phone: #b4a5e8; --c-portal: #85cfa0; --c-server: #d6c094;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f161b; --surface: #16212a; --ink: #e3ebef; --muted: #98a9b4; --rule: #2a3a45;
+  --accent: #7cc0dd; --accent-soft: #1b3341; --warn: #f0c46a; --warn-soft: #3a2e14;
+  --c-glasses: #7cc0dd; --c-phone: #b4a5e8; --c-portal: #85cfa0; --c-server: #d6c094;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 16px/1.6 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 48px 96px;
+}
+.page { max-width: 1040px; margin: 0 auto; display: grid; gap: 64px; }
+.col { max-width: 68ch; }
+section { display: grid; gap: 18px; min-width: 0; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2.6rem, 7vw, 4.2rem); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: clamp(1.5rem, 3.4vw, 2rem); font-weight: 700; }
+h3 { font-size: 1.15rem; font-weight: 500; }
+p, ul, ol { margin: 0; }
+ul, ol { padding-left: 1.2em; display: grid; gap: 6px; }
+.eyebrow { font: 600 0.75rem/1 var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.lede { font-size: 1.25rem; line-height: 1.5; max-width: 40ch; }
+.muted { color: var(--muted); }
+.small { font-size: 0.875rem; }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+a { color: var(--accent); }
+
+header { display: grid; gap: 20px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 0.85rem var(--f-mono); color: var(--muted); }
+
+.note { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: 16px 20px; border-radius: 4px; display: grid; gap: 10px; }
+.note h3 { color: var(--warn); font-size: 1rem; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+.stat { display: grid; gap: 4px; align-content: start; }
+.stat b { font: 700 2rem/1 var(--f-display); color: var(--accent); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 0.92rem; }
+.stat cite { font-size: 0.78rem; color: var(--muted); font-style: normal; }
+
+.principle { background: var(--accent-soft); padding: 24px; border-radius: 6px; display: grid; gap: 12px; }
+.principle blockquote { margin: 0; font: 500 1.2rem/1.4 var(--f-display); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 0.72rem/1.3 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--paper); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+
+.chip { display: inline-block; font: 600 0.7rem/1 var(--f-mono); letter-spacing: 0.04em; padding: 4px 7px; border-radius: 3px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.local { color: var(--c-portal); }
+.chip.cloud { color: var(--c-phone); }
+.chip.g { color: var(--c-glasses); }
+.chip.p { color: var(--c-phone); }
+.chip.c { color: var(--c-portal); }
+.chip.s { color: var(--c-server); }
+.chip.p0 { color: var(--accent); background: var(--accent-soft); }
+.chip.p1 { color: var(--muted); }
+.chip.x { color: var(--warn); }
+
+.hud-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+figure { margin: 0; display: grid; gap: 8px; }
+figcaption { font-size: 0.85rem; color: var(--muted); }
+.hud {
+  aspect-ratio: 2 / 1; max-width: 100%; background: var(--hud-bg); border-radius: 10px;
+  padding: 5% 6%; font: 400 clamp(0.72rem, 1.9vw, 0.9rem)/1.45 var(--f-mono); color: var(--hud-mid);
+  display: grid; align-content: start; gap: 2px; overflow: hidden;
+}
+.hud .hi { color: var(--hud-hi); font-weight: 600; }
+.hud .lo { color: var(--hud-lo); }
+
+.portals { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.portal { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 22px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.portal h3 { font-size: 1.3rem; }
+.portal h4 { margin: 0; font: 600 0.75rem/1 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.portal .group { display: grid; gap: 8px; }
+
+.flows { display: grid; gap: 28px; }
+.flow { display: grid; gap: 10px; min-width: 0; }
+.flow-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+.flow-head h3 { font-weight: 700; }
+.steps { list-style: none; padding: 0; counter-reset: s; display: grid; gap: 0; border-left: 2px solid var(--rule); margin-left: 10px; }
+.steps li { counter-increment: s; position: relative; padding: 6px 0 6px 26px; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: baseline; }
+.steps li::before { content: counter(s); position: absolute; left: -11px; top: 7px; width: 20px; height: 20px; border-radius: 50%; background: var(--paper); border: 2px solid var(--rule); font: 600 0.68rem/16px var(--f-mono); text-align: center; color: var(--muted); }
+@media (max-width: 520px) { .steps li { grid-template-columns: 1fr; gap: 4px; } }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.demo ol { gap: 12px; }
+.features { display: grid; gap: 28px; }
+.tier { display: grid; gap: 12px; }
+.feat { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; display: grid; gap: 8px; }
+.feat-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; }
+.feat-head h3 { font-weight: 700; font-size: 1.05rem; }
+.feat .done { font-size: 0.88rem; color: var(--muted); }
+.feat .done b { color: var(--ink); font-weight: 600; }
+</style>
+
+<div class="page">
+
+<header>
+  <span class="eyebrow">LA Hacks 2026 · Work in progress</span>
+  <h1>HALO</h1>
+  <p class="lede">An AI care team for people living with dementia and the families who look after them.</p>
+  <div class="meta"><span>Team: [names]</span><span>Contact: [emails]</span><span>Devpost: [link]</span></div>
+</header>
+
+<section class="col">
+  <span class="eyebrow">The one-liner</span>
+  <p style="font: 500 1.35rem/1.45 var(--f-display)">HALO remembers for people with dementia, keeps their medicines and routine on track, and keeps their family and doctor informed, so they can stay independent at home for longer.</p>
+</section>
+
+<aside class="note col">
+  <h3>What changed from the first draft</h3>
+  <ul class="small">
+    <li><b>The G2 glasses have microphones but no camera and no speaker.</b> HALO recognizes people by voice, not by face, and talks to the patient in short text on the display. Spoken replies are optional, through the phone or earbuds.</li>
+    <li><b>Payment blocking moved to "later".</b> A phone or bank does it better than glasses. Spending limits stay, but only for HALO's own medicine refill orders.</li>
+    <li><b>Scam call detection moved to "later".</b> It isn't in the core feature set, and it depends on live call audio we haven't confirmed we can get.</li>
+    <li><b>Family messages are filtered.</b> Only contacts the family approves show up on the glasses.</li>
+    <li>Added a split of what runs locally and what runs in the cloud, the two portals, and the user flows.</li>
+  </ul>
+</aside>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">The problem</span>
+    <h2>Dementia changes every day. Help arrives in fragments.</h2>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>55M</b><span>people live with dementia worldwide, and about 10 million more are diagnosed each year.</span><cite>WHO</cite></div>
+    <div class="stat"><b>11M+</b><span>unpaid family caregivers in the US provide billions of hours of dementia care a year. Burnout is a leading reason people move into care homes.</span><cite>Alzheimer's Association</cite></div>
+    <div class="stat"><b>$3.4B</b><span>in fraud losses reported by Americans over 60 in 2023.</span><cite>FBI IC3</cite></div>
+  </div>
+  <div class="col" style="display:grid;gap:12px">
+    <p>Doctors see patients a few times a year. Memory, speech and eating habits change every day, and families struggle to describe what changed between visits.</p>
+    <p>Today's tools each cover one piece: a pill reminder app, a GPS tracker, a shared calendar. None of them connect remembering, routine, family coordination and medical insight, and none of them work hands-free in the moment the patient needs them.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">The solution</span>
+    <h2>A team of AI agents that listens, remembers and quietly prompts</h2>
+    <p>The patient wears Even Realities G2 glasses. HALO listens through the glasses' microphones, works out who is speaking, and remembers what was said and agreed. When it helps, it shows a few words on the display: who just walked in, what's planned today, that it's time for the 2&nbsp;pm tablet.</p>
+    <p>The family and the doctor share a web portal. Families set HALO up, approve contacts and refills, and get a plain-language summary of each day. Doctors upload prescriptions and read a weekly trend report. HALO never diagnoses and never prescribes.</p>
+  </div>
+  <div class="hud-grid">
+    <figure>
+      <div class="hud" role="img" aria-label="Glasses display mockup: today summary">
+        <span class="lo">SAT 18 OCT · 9:41 AM</span>
+        <span class="hi">Good morning, Joe.</span>
+        <span>Maya visits at 2:00 PM</span>
+        <span>Pills taken 8:12 AM ✓</span>
+        <span class="lo">Next: lunch around 12:30</span>
+      </div>
+      <figcaption>Morning: today at a glance. The display is 576 × 288 pixels in 16 shades of green, so every screen fits in about five short lines.</figcaption>
+    </figure>
+    <figure>
+      <div class="hud" role="img" aria-label="Glasses display mockup: visitor recognized">
+        <span class="lo">● VOICE MATCH</span>
+        <span class="hi">Maya · granddaughter</span>
+        <span>Started at UCLA in Sept</span>
+        <span>Last visit: Sun 12 Oct</span>
+        <span class="lo">source: family profile, 12 Oct visit</span>
+      </div>
+      <figcaption>A visitor: HALO matches Maya's voice to her enrolled voiceprint and prompts her name before Joe has to ask.</figcaption>
+    </figure>
+    <figure>
+      <div class="hud" role="img" aria-label="Glasses display mockup: honest unknown answer">
+        <span class="lo">YOU ASKED</span>
+        <span>"Did Paul call me?"</span>
+        <span class="hi">I'm not sure.</span>
+        <span>No call from Paul today.</span>
+        <span class="lo">Tap to message Maya</span>
+      </div>
+      <figcaption>Honesty: there's no record of a call, so the Fact-checker blocks a guess and HALO says so.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="principle">
+  <span class="eyebrow">What makes HALO different</span>
+  <blockquote>HALO never invents a memory.</blockquote>
+  <p class="col">An AI that confidently tells someone with dementia "your daughter called this morning" when she didn't causes real confusion and harm. A dedicated Fact-checker agent reviews everything before it reaches the display. Every statement has to point to a stored, timestamped memory: a transcript line, a calendar entry, a prescription or a logged dose. If there's no source, HALO doesn't say it. It answers honestly instead: "I'm not sure. Want to ask Maya?"</p>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">How it works</span>
+    <h2>The agent team</h2>
+    <p>Every agent's actions are written to an activity log that the family can read in the care portal, so they can see what HALO did and why.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Agent</th><th>What it does</th><th>Runs</th></tr></thead>
+      <tbody>
+        <tr><td>Listener</td><td>Streams audio from the G2 microphones, turns speech into text, splits it by speaker and matches each voice to an enrolled family member or friend.</td><td><span class="chip local">local</span> voice match<br><span class="chip cloud">cloud</span> transcription</td></tr>
+        <tr><td>Memory Keeper</td><td>Stores people, events, conversations, meals and routines, each with a time and a source.</td><td><span class="chip local">local</span> or hosted DB</td></tr>
+        <tr><td>Companion</td><td>Writes the short replies the patient sees. Follows dementia-care practice: never argues, never says "I already told you", keeps one consistent tone.</td><td><span class="chip cloud">cloud</span></td></tr>
+        <tr><td>Fact-checker</td><td>Blocks any statement that doesn't cite a stored memory. Part rule-based check, part small model.</td><td><span class="chip local">local</span></td></tr>
+        <tr><td>Scheduler</td><td>Picks up plans made in conversation ("I'll come by Saturday at 2") and adds them to the calendar once confirmed.</td><td><span class="chip cloud">cloud</span></td></tr>
+        <tr><td>Routine</td><td>Medicine, meal and daily routine reminders, based only on the doctor's prescriptions and plan. Tracks pill counts.</td><td><span class="chip local">local</span></td></tr>
+        <tr><td>Errands</td><td>Reorders medicine before it runs out, through the pharmacy website, after a family member approves.</td><td><span class="chip cloud">cloud</span></td></tr>
+        <tr><td>Family Liaison</td><td>Passes through messages from approved contacts, sends the daily summary and answers "How was Dad today?"</td><td><span class="chip cloud">cloud</span></td></tr>
+        <tr><td>Clinician</td><td>Builds the weekly trend report: repeated questions, pauses to find words, speech clarity, medicine taken, meals mentioned.</td><td><span class="chip local">local</span> speech metrics<br><span class="chip cloud">cloud</span> write-up</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">Local and cloud</span>
+    <h2>What runs locally, and what runs in the cloud</h2>
+    <p>The rule: anything that identifies a person (their voiceprint) or measures their cognition stays on hardware the family controls. Heavy language work uses cloud models, and only gets text with names already resolved. At the hackathon, "local" means a laptop on the same network as the glasses. In a real home it would be a small hub, such as a Raspberry Pi 5.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Job</th><th>Where</th><th>How</th><th>Why there</th></tr></thead>
+      <tbody>
+        <tr><td>Voice activity, audio buffering</td><td><span class="chip local">local</span></td><td>WebRTC VAD on the 16 kHz audio from the glasses</td><td>Silence never leaves the house</td></tr>
+        <tr><td>Who is speaking</td><td><span class="chip local">local</span></td><td>Open speaker-embedding model (for example ECAPA or pyannote) compared with enrolled voiceprints</td><td>Voiceprints are biometric data</td></tr>
+        <tr><td>Speech to text</td><td><span class="chip cloud">cloud</span></td><td>ElevenLabs Scribe or Gemini. Whisper locally if we have time.</td><td>Accuracy and speed</td></tr>
+        <tr><td>Speech metrics</td><td><span class="chip local">local</span></td><td>Pause lengths from word timestamps, repeated questions by embedding similarity, transcription confidence; veri.studio fine-tune for word-finding pauses</td><td>Cognitive data stays private</td></tr>
+        <tr><td>Fact-checking</td><td><span class="chip local">local</span></td><td>Every reply has to cite memory IDs that exist; a small open model checks the reply says no more than its sources</td><td>Fast and always available</td></tr>
+        <tr><td>Companion replies, plan extraction, summaries</td><td><span class="chip cloud">cloud</span></td><td>Gemini or StepFun step-5-preview, orchestrated with LangGraph</td><td>Needs a strong reasoning model</td></tr>
+        <tr><td>Reading prescriptions</td><td><span class="chip cloud">cloud</span></td><td>Vision model reads an uploaded photo or PDF; the doctor confirms each field</td><td>Accurate document reading</td></tr>
+        <tr><td>Refill orders, messaging</td><td><span class="chip cloud">cloud</span></td><td>Browser Use; Photon for SMS and iMessage</td><td>They talk to outside services anyway</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">Two portals</span>
+    <h2>Who sees what</h2>
+    <p>HALO has two front ends. The patient's side is deliberately tiny: the glasses plus a large-text phone screen. All setup, review and approvals happen in the care portal, which has two roles: family and doctor.</p>
+  </div>
+  <div class="portals">
+    <div class="portal">
+      <span class="eyebrow">Portal 1</span>
+      <h3>Patient</h3>
+      <p class="small muted">Even Hub app on the G2 glasses, plus a large-text phone screen for when the glasses are off. No settings and no menus to get lost in.</p>
+      <div class="group"><h4>Shows</h4>
+        <ul class="small">
+          <li>Today: date, time, plans and who is visiting</li>
+          <li>Name and context when someone familiar starts talking</li>
+          <li>Medicine, meal and routine reminders</li>
+          <li>Messages from approved contacts only</li>
+          <li>Answers to "Ask HALO" questions, each with its source</li>
+        </ul>
+      </div>
+      <div class="group"><h4>Patient can</h4>
+        <ul class="small">
+          <li>Long-press the ring or temple to ask a question</li>
+          <li>Tap to confirm "I took it" or "Yes, add it to my calendar"</li>
+          <li>Say "I had soup for lunch" to log a meal</li>
+          <li>Pause listening with a double-tap</li>
+        </ul>
+      </div>
+    </div>
+    <div class="portal">
+      <span class="eyebrow">Portal 2</span>
+      <h3>Care portal: Family and Doctor</h3>
+      <p class="small muted">One web app with role-based access. Family members manage daily life; doctors see clinical data and nothing personal beyond it.</p>
+      <div class="group"><h4>Family</h4>
+        <ul class="small">
+          <li>Setup: patient profile, routine, people and voice enrollment</li>
+          <li>Approved contacts for messages on the glasses</li>
+          <li>Daily summary and "How was Dad today?" chat</li>
+          <li>Calendar, including plans HALO picked up from conversations</li>
+          <li>Refill approvals and the spending limit</li>
+          <li>Activity log: everything HALO showed and why</li>
+          <li>Forget a person or delete a memory</li>
+        </ul>
+      </div>
+      <div class="group"><h4>Doctor</h4>
+        <ul class="small">
+          <li>Upload prescriptions and the care plan, then confirm the fields HALO read</li>
+          <li>Weekly trend report: speech, repeated questions, medicine taken, diet</li>
+          <li>Notes for the family that reminders can quote</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Data</th><th>Patient</th><th>Family</th><th>Doctor</th></tr></thead>
+      <tbody>
+        <tr><td>Conversation transcripts</td><td>Only as answers</td><td>Read, delete</td><td>No (trend numbers only)</td></tr>
+        <tr><td>People and voiceprints</td><td>Names shown</td><td>Add, remove</td><td>No</td></tr>
+        <tr><td>Calendar</td><td>Today's plans</td><td>Edit, approve</td><td>Appointments only</td></tr>
+        <tr><td>Prescriptions and care plan</td><td>Reminders</td><td>Read</td><td>Upload, edit</td></tr>
+        <tr><td>Doses and pill counts</td><td>Confirm</td><td>Read, approve refills</td><td>Read</td></tr>
+        <tr><td>Meal log</td><td>Logs by voice</td><td>Read, correct</td><td>Read</td></tr>
+        <tr><td>Weekly trend report</td><td>No</td><td>Read</td><td>Read, export</td></tr>
+        <tr><td>Approved contacts</td><td>Gets messages</td><td>Edit</td><td>No</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">User flows</span>
+    <h2>How each feature plays out, step by step</h2>
+    <div class="legend small"><span class="chip g">Glasses</span><span class="chip p">Phone</span><span class="chip c">Care portal</span><span class="chip s">HALO backend</span></div>
+  </div>
+  <div class="flows">
+
+    <div class="flow">
+      <div class="flow-head"><h3>A. Setup</h3><span class="muted small">Family, once, with the patient present to consent</span></div>
+      <ol class="steps">
+        <li><span>Family member creates the patient profile and invites the doctor</span><span class="chip c">Care portal</span></li>
+        <li><span>Patient agrees to use HALO, in person with the family, and the consent is recorded</span><span class="chip c">Care portal</span></li>
+        <li><span>Each family member and friend reads a 20-second passage to enroll their voice, and adds a short "about me"</span><span class="chip p">Phone</span></li>
+        <li><span>Family picks approved contacts and sets the refill spending limit</span><span class="chip c">Care portal</span></li>
+        <li><span>Doctor uploads the prescription; HALO reads it and the doctor confirms each medicine, dose and time</span><span class="chip c">Care portal</span></li>
+        <li><span>Patient scans the QR code once; HALO shows "Hello, Joe" on the glasses</span><span class="chip g">Glasses</span></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head"><h3>B. Recognizing who is speaking</h3><span class="muted small">Voice recognition and labels</span></div>
+      <ol class="steps">
+        <li><span>Glasses stream microphone audio to the local hub</span><span class="chip g">Glasses</span></li>
+        <li><span>A new voice starts; HALO compares it with enrolled voiceprints</span><span class="chip s">Backend</span></li>
+        <li><span>Confident match: show name, relationship and one recent fact</span><span class="chip g">Glasses</span></li>
+        <li><span>No match: label them "Guest 1" in the transcript and show nothing</span><span class="chip s">Backend</span></li>
+        <li><span>Family can name a guest later, and that voice is recognized from then on</span><span class="chip c">Care portal</span></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head"><h3>C. Plans from conversation to calendar</h3></div>
+      <ol class="steps">
+        <li><span>Maya says, "I'll come by Saturday at 2 and we'll go to the park"</span><span class="chip g">Glasses</span></li>
+        <li><span>Scheduler extracts the date, time, who and what, linked to that transcript line</span><span class="chip s">Backend</span></li>
+        <li><span>Glasses ask: "Add Maya, Sat 2 PM, park? Tap yes"</span><span class="chip g">Glasses</span></li>
+        <li><span>Tap adds the event. With no tap, it waits in the portal for the family to approve</span><span class="chip c">Care portal</span></li>
+        <li><span>On the day, the morning screen and a reminder an hour before show the visit</span><span class="chip g">Glasses</span></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head"><h3>D. Medicine, meals and routine</h3></div>
+      <ol class="steps">
+        <li><span>At a dose time from the prescription: "2 PM: Donepezil, 1 tablet"</span><span class="chip g">Glasses</span></li>
+        <li><span>Patient taps or says "took it"; HALO logs the dose and lowers the pill count</span><span class="chip g">Glasses</span></li>
+        <li><span>No confirmation after 30 minutes: one gentle repeat, then a note to the family</span><span class="chip c">Care portal</span></li>
+        <li><span>Patient mentions a meal ("had toast and tea"); HALO logs it</span><span class="chip s">Backend</span></li>
+        <li><span>Meal reminders quote the doctor's plan only, for example "Dr. Patel: low salt". HALO makes no diet suggestions of its own</span><span class="chip g">Glasses</span></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head"><h3>E. Refill before it runs out</h3></div>
+      <ol class="steps">
+        <li><span>Pill count drops to 7 days left</span><span class="chip s">Backend</span></li>
+        <li><span>Errands agent prepares a refill on the pharmacy website with Browser Use and stops before paying</span><span class="chip s">Backend</span></li>
+        <li><span>Family gets "Refill Donepezil, $12.40, approve?"</span><span class="chip c">Care portal</span></li>
+        <li><span>On approval within the spending limit, the order is placed and the pickup or delivery date goes on the calendar</span><span class="chip c">Care portal</span></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head"><h3>F. Messages from approved contacts</h3></div>
+      <ol class="steps">
+        <li><span>A text arrives on the patient's phone</span><span class="chip p">Phone</span></li>
+        <li><span>Sender isn't approved: nothing shows on the glasses. It's listed in the portal for the family</span><span class="chip c">Care portal</span></li>
+        <li><span>Sender is approved: "Maya (granddaughter): Running 10 min late!"</span><span class="chip g">Glasses</span></li>
+        <li><span>Patient long-presses to reply by voice; HALO reads the reply back before sending</span><span class="chip g">Glasses</span></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head"><h3>G. Daily summary and weekly report</h3></div>
+      <ol class="steps">
+        <li><span>Throughout the day HALO logs speech metrics, doses and meals</span><span class="chip s">Backend</span></li>
+        <li><span>8 PM: the family gets a plain-language summary of the day</span><span class="chip c">Care portal</span></li>
+        <li><span>Family can ask "How was Dad today?" and get an answer with sources</span><span class="chip c">Care portal</span></li>
+        <li><span>Sunday: the doctor's weekly report charts changes against the previous weeks, with no diagnosis or advice</span><span class="chip c">Care portal</span></li>
+      </ol>
+    </div>
+
+  </div>
+</section>
+
+<section class="col demo">
+  <span class="eyebrow">Demo</span>
+  <h2>"For the next 3 minutes, you are Joe"</h2>
+  <p>The judge wears the G2 glasses and plays Joe, 78, who lives alone with early-stage dementia. A teammate plays Maya. The patient history is synthetic; everything in the three minutes runs live.</p>
+  <ol>
+    <li><b>Morning.</b> Joe long-presses and asks what's happening today. The glasses show the day, that Maya visits at 2, and that he took his pills at 8:12.</li>
+    <li><b>A visitor.</b> Maya starts talking. HALO recognizes her voice and shows who she is and what's new with her.</li>
+    <li><b>A plan.</b> Maya says she'll come back Saturday at 2. The glasses ask to add it; Joe taps yes, and it appears on the family's calendar.</li>
+    <li><b>Honesty.</b> Joe asks about a call that never happened. The care portal shows the Fact-checker blocking a made-up answer, live.</li>
+    <li><b>Medicine.</b> A 2 PM reminder appears. Joe confirms. The pill count drops below the threshold and a refill request lands on the caregiver's phone.</li>
+    <li><b>The family and doctor.</b> The caregiver sees the day's summary; the doctor's view shows the week's trends.</li>
+  </ol>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">Tech stack</span>
+    <h2>What we're building with</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Layer</th><th>Technology</th><th>Used for</th></tr></thead>
+      <tbody>
+        <tr><td>Glasses app</td><td>Even Hub SDK, Vite, TypeScript</td><td>Microphone audio, display, ring and touchpad input</td></tr>
+        <tr><td>Portals</td><td>Next.js</td><td>Large-text patient phone screen, care portal</td></tr>
+        <tr><td>Agents</td><td>LangGraph, Python, FastAPI</td><td>Coordinating the agent team</td></tr>
+        <tr><td>Reasoning and documents</td><td>Gemini, StepFun step-5-preview</td><td>Companion replies, plan extraction, reading prescriptions</td></tr>
+        <tr><td>Speech</td><td>ElevenLabs Scribe; open speaker-embedding model</td><td>Transcription; voice recognition</td></tr>
+        <tr><td>Speech patterns</td><td>veri.studio fine-tune of an open model</td><td>Word-finding pauses and repeated questions</td></tr>
+        <tr><td>Memory and trends</td><td>Tiger Data (Postgres with time-series and vector search)</td><td>Memories, events, doses, meals, weekly trends</td></tr>
+        <tr><td>Messaging</td><td>Photon</td><td>Messages from approved contacts, family alerts</td></tr>
+        <tr><td>Refills</td><td>Browser Use</td><td>Ordering on the pharmacy website</td></tr>
+        <tr><td>Monitoring</td><td>Sentry</td><td>Tracing and agent monitoring</td></tr>
+        <tr><td>Hosting</td><td>Vultr, GoDaddy Registry</td><td>Deployment and domain</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted col">Remove any sponsor we don't actually integrate before we share this, so the doc doesn't claim work we haven't done. Visa only stays if we use it for the refill spending limit.</p>
+</section>
+
+<section class="col">
+  <span class="eyebrow">Trust, safety and ethics</span>
+  <h2>Ground rules</h2>
+  <ul>
+    <li><b>Consent.</b> The patient sets HALO up with their family while they're able to agree. Visitors choose whether to enroll their voice, and anyone can be forgotten on request.</li>
+    <li><b>No invented memories.</b> Every statement on the display has a stored source.</li>
+    <li><b>Transparency.</b> The family can see everything HALO showed the patient and every action it took.</li>
+    <li><b>No diagnosis, no prescribing.</b> HALO reports trends and repeats the doctor's instructions. It doesn't diagnose, prescribe or suggest treatment.</li>
+    <li><b>Privacy.</b> Voiceprints and speech metrics stay local. Data is encrypted. Listening can be paused at any time, and the display shows when HALO is listening.</li>
+    <li><b>Human control.</b> Every refill order and every alert goes to a person first.</li>
+  </ul>
+</section>
+
+<section class="col">
+  <span class="eyebrow">Impact and what comes next</span>
+  <h2>Who it's for, and who pays</h2>
+  <ul>
+    <li><b>Who pays:</b> families on a monthly subscription; later, home-care agencies, care organizations and insurers who benefit when people stay home safely for longer.</li>
+    <li><b>Next:</b> pilot with family caregivers through local Alzheimer's support groups, add more languages, and connect to doctors' records systems with consent.</li>
+    <li><b>Later features:</b> scam call screening, payment protection, a wandering alert using phone location, and camera input on a home hub.</li>
+    <li><b>Beyond dementia:</b> stroke recovery, brain injury, and older adults living alone.</li>
+  </ul>
+</section>
+
+<section class="col">
+  <span class="eyebrow">Asks</span>
+  <h2>We'd love your feedback on</h2>
+  <ul>
+    <li><b>Even Realities:</b> best practice for streaming G2 audio all day without draining the battery?</li>
+    <li><b>Photon:</b> can we filter incoming messages by sender and push approved ones to our server in real time?</li>
+    <li><b>StepFun:</b> tips for reliable field extraction from photographed prescriptions?</li>
+    <li><b>veri.studio:</b> the best open model to fine-tune for word-finding pauses?</li>
+    <li><b>Everyone:</b> do you know a family caregiver we could talk to this weekend?</li>
+  </ul>
+</section>
+
+<section>
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">Build list</span>
+    <h2>Primary features to implement</h2>
+    <p>Ordered by priority. P0 is what the demo needs. "Done when" is the check that it works.</p>
+  </div>
+  <div class="features">
+
+    <div class="tier">
+      <h3><span class="chip p0">P0 · must demo</span></h3>
+
+      <div class="feat">
+        <div class="feat-head"><h3>1. Voice recognition and speaker labels</h3><span><span class="chip g">Glasses</span> <span class="chip c">Care portal</span></span></div>
+        <p class="small">Stream G2 microphone audio, transcribe it, split it by speaker, and match voices to enrolled people. Show the name and context on the glasses.</p>
+        <p class="done"><b>Done when:</b> two enrolled teammates take turns talking and the glasses show the right name within 3 seconds; an unknown voice is labeled "Guest".</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>2. Memory store with sources, and the Fact-checker</h3><span><span class="chip s">Backend</span></span></div>
+        <p class="small">Every transcript line, event, dose and meal is stored with a time and a source. "Ask HALO" answers only from cited memories.</p>
+        <p class="done"><b>Done when:</b> asking about something with no record returns "I'm not sure" and the portal shows the blocked draft.</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>3. Plans from conversation to calendar</h3><span><span class="chip g">Glasses</span> <span class="chip c">Care portal</span></span></div>
+        <p class="small">Detect plans made in conversation, confirm with a tap, and save them to the calendar with a link to the transcript.</p>
+        <p class="done"><b>Done when:</b> "I'll visit Saturday at 2" becomes a calendar event after one tap.</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>4. Prescriptions, medicine reminders and routine</h3><span><span class="chip g">Glasses</span> <span class="chip c">Care portal</span></span></div>
+        <p class="small">The doctor uploads a prescription; HALO reads it and the doctor confirms. Reminders appear on the glasses at dose times, the patient confirms with a tap, and pill counts update. Meal and routine reminders quote the doctor's plan only.</p>
+        <p class="done"><b>Done when:</b> a photographed prescription becomes a reminder schedule, and a confirmed dose shows in the portal.</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>5. Care portal: setup, activity log, daily summary</h3><span><span class="chip c">Care portal</span></span></div>
+        <p class="small">Family and doctor roles. Patient profile, people and voice enrollment, approved contacts, calendar, refill approvals, the activity log and the 8 PM summary.</p>
+        <p class="done"><b>Done when:</b> a family member can set up a new patient end to end and see every message HALO showed today.</p>
+      </div>
+    </div>
+
+    <div class="tier">
+      <h3><span class="chip p1">P1 · should have</span></h3>
+
+      <div class="feat">
+        <div class="feat-head"><h3>6. Weekly trend report for the doctor</h3><span><span class="chip c">Care portal</span></span></div>
+        <p class="small">Repeated questions per day, word-finding pauses, speech clarity, doses taken and meals mentioned, charted against earlier weeks. No diagnosis, prescriptions or suggestions.</p>
+        <p class="done"><b>Done when:</b> a week of synthetic history renders as a report the doctor can read in under a minute.</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>7. Messages from approved contacts only</h3><span><span class="chip g">Glasses</span> <span class="chip c">Care portal</span></span></div>
+        <p class="small">Incoming texts pass to the glasses only from contacts the family approved, with the sender's relationship shown.</p>
+        <p class="done"><b>Done when:</b> a text from an approved number appears on the glasses and one from an unknown number doesn't.</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>8. Medicine refills with Browser Use</h3><span><span class="chip s">Backend</span> <span class="chip c">Care portal</span></span></div>
+        <p class="small">When the pill count reaches 7 days, prepare a refill on a pharmacy website, wait for family approval within the spending limit, then place it.</p>
+        <p class="done"><b>Done when:</b> the refill request arrives in the portal and approving it completes the order on a test pharmacy site.</p>
+      </div>
+
+      <div class="feat">
+        <div class="feat-head"><h3>9. Diet log from speech</h3><span><span class="chip g">Glasses</span> <span class="chip s">Backend</span></span></div>
+        <p class="small">Meals the patient mentions are logged automatically and appear in the summary and the weekly report.</p>
+        <p class="done"><b>Done when:</b> "I had toast and tea" shows up as breakfast in the portal.</p>
+      </div>
+    </div>
+
+    <div class="tier">
+      <h3><span class="chip x">Stretch</span></h3>
+      <div class="feat">
+        <div class="feat-head"><h3>10. Camera integration</h3><span><span class="chip p">Phone</span></span></div>
+        <p class="small">The G2 has no camera, so this uses the phone camera through the Even Hub SDK: photograph a pill bottle to check it matches the prescription, or a plate to log a meal.</p>
+        <p class="done"><b>Done when:</b> a photo of a pill bottle is matched to the right prescription.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</div>
