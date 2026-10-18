@@ -79,9 +79,11 @@ export function calendarRoutes(o: RoutesOptions) {
         identifySpeakerWav(wav),
       ])
       if (!text) { json(res, { kind: 'silence', text: '' }); return true }
+      // VoiceID is the sole speaker-identification source. Do not trust an external
+      // x-speaker header as a substitute; non-matches stay explicitly unknown.
       const speaker = voice?.status === 'MATCH' && voice.speaker_name
         ? voice.speaker_name
-        : String(req.headers['x-speaker'] ?? 'unknown')
+        : 'unknown'
       json(res, { ...describe(await cal.hear(text, speaker)), speaker, speakerIdentity: voice })
       return true
     }
