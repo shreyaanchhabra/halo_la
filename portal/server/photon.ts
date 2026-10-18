@@ -6,6 +6,8 @@ import { appointments, formatTime, scheduleFor, ymd } from '../src/schedule'
 import type { DoseLog, DoseSource, GlassesMessage, HaloData, ImessageStatus, Medicine, PriceCheck, TextAlertKind, TextMessage } from '../src/types'
 import { answerCaregiver, type CaregiverAction } from './ai'
 import type { Glasses } from './glasses'
+import { RefillError, type Refills } from './refills.ts'
+import { formatCents } from '../../shared/refill-types.ts'
 import { traceTask } from './sentry'
 
 const POLL_MS = 3_000
@@ -56,6 +58,7 @@ export type ImessageDeps = {
   startPriceCheck: (key: string, med: Medicine, zip: string) => void
   setDose: (medKey: string, slot: string, taken: boolean, by?: DoseSource) => void
   glasses: Glasses
+  refills: Refills // GoodRx refills the family approves here or in the portal
   notify: () => void
 }
 
@@ -165,13 +168,13 @@ export function createImessage(deps: ImessageDeps) {
     for (const e of allMedicines(data)) {
       const left = pillsLeft(e, data, doses)
       const days = daysLeft(e, data, doses)
-      const refill = data.refills?.[e.key]
+      const refill = deps.refills.state().refills.find(r => r.medKey === e.key && r.status !== 'cancelled' && r.status !== 'received')
       const p = prices[e.key]
       const best = p?.quotes?.[0]
       lines.push(`- key ${e.key}: ${medName(e)}, ${e.med.instructions}. Times: ${e.med.times.map(formatTime).join(', ') || 'none'}.`
         + ` Pills left: ${left ?? 'unknown'}${days != null ? ` (about ${days} days)` : ''}.`
         + `${refillDue(e, data, doses) ? ' Refill due.' : ''}`
-        + `${refill ? ` Refill ${refill.status} ${refill.at.slice(0, 10)}.` : ''}`
+        + `${refill ? ` Refill ${refill.status.replace('_', ' ')}${refill.quote ? `: ${formatCents(refill.quote.priceCents)} at ${refill.quote.pharmacy} on GoodRx` : ''}.` : ''}`
         + `${p?.status === 'checking' ? ' GoodRx check running.' : ''}`
         + `${best ? ` Cheapest on GoodRx: ${money(best.price)} at ${best.pharmacy}.` : ''}`)
     }
@@ -264,15 +267,17 @@ export function createImessage(deps: ImessageDeps) {
     const entry = allMedicines(data).find(e => e.key === action.medKey)
     if (!entry) return null
     if (action.type === 'approve_refill') {
-      const best = deps.readPrices()[entry.key]?.quotes?.[0]
-      data.refills = {
-        ...data.refills,
-        [entry.key]: { status: 'approved', at: new Date().toISOString(), pharmacy: best?.pharmacy, price: best?.price, via: 'imessage' },
-      }
-      deps.saveData(data)
-      return {
-        text: `Refill approved for ${medName(entry)}${best ? `, ${money(best.price)} at ${best.pharmacy}` : ''}. `
-          + 'Order it with the pharmacy, then update the pill count in the HALO portal.',
+      const open = deps.refills.state().refills.find(r => r.medKey === entry.key && r.status === 'awaiting_approval' && r.quote)
+      if (!open?.quote) return { text: `There is no ${medName(entry)} refill waiting for approval. I only ask once the GoodRx prices are in.` }
+      try {
+        const r = deps.refills.approve(open.id, { approvedBy: formatNumber(c.handle), expectedPriceCents: open.quote.priceCents })
+        return {
+          text: `Approved: ${r.quantity} tablets of ${medName(entry)} at ${r.quote!.pharmacy} for ${formatCents(r.quote!.priceCents)} with the GoodRx coupon. `
+            + 'A pickup reminder is on the calendar. I have not bought anything, so pick it up there.',
+        }
+      } catch (err) {
+        if (err instanceof RefillError) return { text: err.message }
+        throw err
       }
     }
     const zip = data.patient.zip ?? ''
@@ -317,11 +322,9 @@ export function createImessage(deps: ImessageDeps) {
 
     // Refill texts say "Reply approve", so a bare approve goes to the one waiting refill
     if (/^(approve|approved|yes approve)( (the )?refill)?[\s.!]*$/i.test(text)) {
-      const data = deps.readData()
-      const doses = deps.readDoses()
-      const waiting = allMedicines(data).filter(e => refillDue(e, data, doses) && !data.refills?.[e.key])
+      const waiting = deps.refills.state().refills.filter(r => r.status === 'awaiting_approval')
       if (waiting.length === 1) {
-        await send(c, runAction(c, { type: 'approve_refill', medKey: waiting[0].key })!.text, `reply:${m.id}`)
+        await send(c, runAction(c, { type: 'approve_refill', medKey: waiting[0].medKey })!.text, `reply:${m.id}`)
         return
       }
     }
@@ -415,14 +418,14 @@ export function createImessage(deps: ImessageDeps) {
     }
 
     for (const e of allMedicines(data)) {
-      const refill = data.refills?.[e.key]
-      if (refillDue(e, data, doses) && !refill) {
-        const best = prices[e.key]?.quotes?.[0]
+      // The family is asked once the errands agent has the GoodRx prices (never before, and never again for the same quote)
+      const waiting = deps.refills.state().refills.find(r => r.medKey === e.key && r.status === 'awaiting_approval' && r.quote)
+      if (waiting?.quote) {
+        const others = waiting.quote.prices.length - 1
         due.push({
-          keys: [`refill:${e.key}:${data.stock?.[e.key]?.at ?? 'start'}`], kind: 'refill', medKeys: [e.key],
-          text: `${medName(e)} is running low, about ${daysLeft(e, data, doses)} days left.`
-            + (best ? ` Cheapest on GoodRx is ${money(best.price)} at ${best.pharmacy}.` : '')
-            + ' Reply "approve" to approve the refill.',
+          keys: [`refill:${waiting.id}:${waiting.quote.expiresAt}`], kind: 'refill', medKeys: [e.key],
+          text: `${medName(e)} is running low, about ${daysLeft(e, data, doses)} days left. Cheapest on GoodRx: ${formatCents(waiting.quote.priceCents)} at ${waiting.quote.pharmacy}`
+            + `${others > 0 ? ` (${others} more pharmacies in the portal)` : ''}. I won't buy anything. Reply "approve" and I'll put a pickup reminder on the calendar.`,
         })
       }
       const p = prices[e.key]

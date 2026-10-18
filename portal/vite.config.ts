@@ -6,6 +6,7 @@ import { readPrescription, transcribe } from './server/ai'
 import { createGlasses } from './server/glasses'
 import { checkGoodRx } from './server/goodrx'
 import { calendarRoutes } from './server/calendar-routes.ts'
+import { refillRoutes } from './server/refill-routes.ts'
 import { createImessage, formatNumber } from './server/photon'
 import { finishRequest, initCareSentry, reportError, traceCareRequest, tracePriceLookup } from './server/sentry'
 import type { DoseLog, DoseSource, HaloData, ImessageStatus, Medicine, PriceCheck } from './src/types'
@@ -64,6 +65,9 @@ function jsonStore(keys: Keys): Plugin {
       // Plans from conversation to calendar: /api/plans, /api/audio, /api/glasses/state, /api/transcripts (POST) and more
       const calendar = calendarRoutes({ apiKey: groqKey, dataDir: DATA_DIR, notify, answerWindowMs: Number(process.env.HALO_ANSWER_WINDOW_MS) || undefined })
       server.httpServer?.on('close', calendar.stop)
+      // Refill before it runs out: pill count -> errands agent -> family approval -> order -> pickup on the calendar
+      const refills = refillRoutes({ dataDir: DATA_DIR, notify, calendar: calendar.cal, browserUseKey: keys.browserUse })
+      server.httpServer?.on('close', refills.stop)
       const needKey = () => {
         if (!groqKey) throw new Error('GROQ_API_KEY is missing. Add it to portal/.env and restart the portal.')
       }
@@ -96,6 +100,7 @@ function jsonStore(keys: Keys): Plugin {
         const doses = readDoses().filter(d => !(d.medKey === medKey && d.slot === slot))
         if (taken) doses.push({ medKey, slot, at: new Date().toISOString(), ...(by ? { by } : {}) })
         writeJson(DOSES_FILE, doses)
+        refills.check() // a dose can take the pill count down to 7 days
         notify()
       }
       const glasses = createGlasses(GLASSES_FILE, notify)
@@ -114,6 +119,7 @@ function jsonStore(keys: Keys): Plugin {
           startPriceCheck,
           setDose,
           glasses,
+          refills: refills.refills,
           notify,
         })
         : null
@@ -126,12 +132,14 @@ function jsonStore(keys: Keys): Plugin {
         await traceCareRequest(req, url.pathname, async () => {
         try {
           if (await calendar.handle(req, res, url)) return
+          if (await refills.handle(req, res, url)) return
           if (url.pathname === '/api/data' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(fs.existsSync(DATA_FILE) ? fs.readFileSync(DATA_FILE) : '{}')
           } else if (url.pathname === '/api/data' && req.method === 'PUT') {
             const data = JSON.parse((await readBody(req)).toString())
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2))
+            refills.check() // a new pill count or prescription can start or cancel a refill
             notify()
             res.end('{"ok":true}')
           } else if (url.pathname === '/api/upload' && req.method === 'POST') {
@@ -169,6 +177,12 @@ function jsonStore(keys: Keys): Plugin {
           } else if (url.pathname === '/api/prices' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify(readJson(PRICES_FILE, {})))
+          } else if (url.pathname === '/api/prices' && req.method === 'DELETE') {
+            const all = readJson<Record<string, unknown>>(PRICES_FILE, {})
+            delete all[url.searchParams.get('key') ?? '']
+            writeJson(PRICES_FILE, all)
+            notify()
+            res.end('{"ok":true}')
           } else if (url.pathname === '/api/prices' && req.method === 'POST') {
             const { key, med, zip } = JSON.parse((await readBody(req)).toString())
             if (!/^\d{5}$/.test(zip ?? '')) throw new Error("Add the patient's 5-digit ZIP code first.")

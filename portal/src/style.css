@@ -85,6 +85,27 @@ summary { cursor: pointer; }
 .refill-actions { display: flex; gap: 14px; align-items: center; }
 button.link:disabled { opacity: 0.5; cursor: wait; }
 
+.refill.bad { background: #fbe9e7; border: 1px solid #e3a79f; color: #7a1f14; }
+.refill .warn { color: #7a1f14; font-weight: 600; }
+.refill-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; align-items: end; padding: 12px; background: var(--bg); border-radius: 6px; }
+.refill-settings .hint { grid-column: 1 / -1; }
+
+.low-summary ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.tag.low { background: #fbf1dc; border-color: #e3c27a; color: #5c3f00; font-weight: 600; }
+.dose-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.dose { display: inline-flex; gap: 8px; align-items: center; font-size: 0.9rem; }
+.dose.taken { color: #1f4d30; font-weight: 600; }
+.dose button.secondary { padding: 4px 10px; font-size: 0.85rem; }
+
+.card h3.sub { margin: 4px 0 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+#plans-card .list .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; align-items: center; align-content: flex-start; }
+
+.by-hand { border: 1px dashed var(--rule); border-radius: 8px; padding: 10px 14px; }
+.by-hand summary { cursor: pointer; font-weight: 600; }
+.by-hand form, .edit-form { display: grid; gap: 10px; margin-top: 10px; }
+.edit-form { margin: 0; }
+.by-hand[hidden], .edit-form [hidden] { display: none !important; }
+
 .connect { margin: 0; }
 .list p.texted { color: var(--accent); font-size: 0.85rem; }
 .thread { list-style: none; margin: 0; padding: 12px; display: grid; gap: 8px; background: var(--bg); border-radius: 6px; max-height: 360px; overflow-y: auto; }

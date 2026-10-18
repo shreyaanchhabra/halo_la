@@ -1,8 +1,12 @@
+import './month.css'
 import './patient.css'
 import { initSentry } from './sentry'
 
 initSentry('patient')
-import { addTranscript, esc, fileUrl, loadAsk, loadData, loadDoses, loadPlans, loadTranscripts, onDataChanged, planAction, setDose } from './api'
+import { addTranscript, esc, fileUrl, loadAsk, loadData, loadDoses, loadPlans, loadRefills, loadTranscripts, onDataChanged, planAction, setDose } from './api'
+import { allMedicines, runningLow, supply, supplyText } from './meds'
+import { longDate, monthGridHtml, monthStart, monthTitle, shiftMonth, type Mark } from './month.ts'
+import type { RefillState } from '../../shared/refill-types.ts'
 import { appointments, formatTime, scheduleFor, ymd, type ScheduleItem } from './schedule'
 import type { DoseLog, GlassesState, HaloData, Plan, TranscriptLine } from './types'
 
@@ -23,6 +27,9 @@ function doseControl(i: ScheduleItem) {
     : `<button class="took" data-took="${esc(i.medKey!)}|${esc(i.slot!)}">I took it</button>`
 }
 let plans: Plan[] = []
+let refills: RefillState | null = null
+let calView = monthStart(new Date())
+let calSelected = ymd(new Date())
 let ask: GlassesState['prompt'] = null
 
 const nowHHMM = () => {
@@ -92,8 +99,52 @@ function renderAsk() {
     b.addEventListener('click', async () => { b.disabled = true; await planAction(ask!.id, b.dataset.answer as 'yes' | 'no').catch(() => {}) }))
 }
 
+// A month calendar the patient can look through: plans, appointments and pickups. Read-only.
+function calendarMarks(day: string): Mark[] {
+  const out: Mark[] = []
+  for (const a of appointments(data, plans).filter(x => x.date === day)) out.push({ time: a.time ? formatTime(a.time) : '', label: a.title, cls: '', at: new Date(`${day}T${a.time ?? '00:00'}`).getTime() })
+  return out
+}
+
+function renderCalendar() {
+  const isToday = calSelected === ymd(new Date())
+  const items = scheduleFor(data, new Date(`${calSelected}T12:00`), plans)
+  const label = isToday ? 'Today' : longDate(calSelected)
+  $('calendar').innerHTML = `
+    <div class="month-head">
+      <h2>${esc(monthTitle(calView))}</h2>
+      <button type="button" data-cal="prev" aria-label="Previous month">‹ Back</button>
+      <button type="button" data-cal="now">Today</button>
+      <button type="button" data-cal="next" aria-label="Next month">Next ›</button>
+    </div>
+    ${monthGridHtml({ view: calView, selected: calSelected, today: ymd(new Date()), marksFor: calendarMarks, maxChips: 2 })}
+    <h3 class="cal-day">${esc(isToday ? `Today, ${longDate(calSelected)}` : label)}</h3>
+    <ul class="schedule">${items.length ? items.map(i => `
+      <li>
+        <span class="time">${i.time ? formatTime(i.time) : 'All day'}</span>
+        <span><b>${i.kind === 'medicine' ? 'Take ' : ''}${esc(i.title)}</b><small>${esc(i.detail)}</small>${isToday ? doseControl(i) : ''}</span>
+      </li>`).join('') : '<li class="empty">Nothing planned this day.</li>'}</ul>`
+}
+
+// A calm heads-up when a medicine is running low, and what the family is doing about it
+function renderLow() {
+  const box = $('low')
+  const low = runningLow(data, doses)
+  box.hidden = !low.length
+  if (!low.length) { box.innerHTML = ''; return }
+  const status = (key: string) => {
+    const r = refills?.refills.find(x => x.medKey === key && x.status !== 'cancelled' && x.status !== 'received')
+    if (r?.status === 'approved' && r.pickupAt) return `Your family is getting more. Pickup: ${new Date(r.pickupAt).toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' })}.`
+    return 'Your family is arranging more.'
+  }
+  box.innerHTML = `<p class="label">Running low</p>${low.map(({ entry, supply: s }) => `
+    <p class="low-title">${esc(`${entry.med.name} ${entry.med.strength}`)}: ${esc(supplyText(s))}</p>
+    <p class="low-note">${esc(status(entry.key))}</p>`).join('')}`
+}
+
 function render() {
   renderClock()
+  renderCalendar()
   renderSchedule()
   renderAsk()
 
@@ -108,14 +159,19 @@ function render() {
       </li>`).join('')
     : '<li class="empty">Your family will add people here.</li>'
 
-  const meds = data.prescriptions.flatMap(rx => rx.reading?.medicines ?? [])
+  renderLow()
+  const meds = allMedicines(data)
   $('medicines').innerHTML = meds.length
-    ? meds.map(m => `
+    ? meds.map(e => {
+      const s = supply(e, data, doses)
+      return `
       <li>
-        <b>${esc(`${m.name} ${m.strength}`)}</b>
-        <span>${m.times.map(formatTime).join(' and ')}</span>
-        <small>${esc(m.instructions)}</small>
-      </li>`).join('')
+        <b>${esc(`${e.med.name} ${e.med.strength}`)}</b>
+        <span>${e.med.times.map(formatTime).join(' and ')}</span>
+        <small>${esc(e.med.instructions)}</small>
+        ${s ? `<small class="supply${s.low ? ' is-low' : ''}">${s.low ? 'Running low: ' : ''}${esc(supplyText(s))}</small>` : ''}
+      </li>`
+    }).join('')
     : '<li class="empty">No medicines yet.</li>'
 
   const notes = data.prescriptions.flatMap(rx => (rx.reading?.notes ?? []).map(n => ({ n, doctor: rx.doctor })))
@@ -130,9 +186,20 @@ function renderHeard() {
 }
 
 async function load() {
-  ;[data, doses, plans, ask] = await Promise.all([loadData(), loadDoses(), loadPlans(), loadAsk().then(s => s.prompt)])
+  ;[data, doses, plans, ask, refills] = await Promise.all([loadData(), loadDoses(), loadPlans(), loadAsk().then(s => s.prompt), loadRefills().catch(() => null)])
   render()
 }
+
+document.addEventListener('click', e => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-cal], [data-act="day"]')
+  if (!el) return
+  const cal = el.dataset.cal
+  if (cal === 'prev') calView = shiftMonth(calView, -1)
+  else if (cal === 'next') calView = shiftMonth(calView, 1)
+  else if (cal === 'now') { calSelected = ymd(new Date()); calView = monthStart(new Date()) }
+  else if (el.dataset.day) { calSelected = el.dataset.day; const d = new Date(`${calSelected}T00:00`); if (d.getMonth() !== calView.getMonth()) calView = monthStart(d) }
+  renderCalendar()
+})
 
 document.addEventListener('click', async e => {
   const { took, undo } = (e.target as HTMLElement).dataset

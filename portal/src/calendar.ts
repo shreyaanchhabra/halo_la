@@ -1,10 +1,12 @@
 import './style.css'
+import './month.css'
 import './calendar.css'
 import {
   addPlan, addTranscript, deletePlan, editPlan, esc, loadData, loadPlans, loadPresent, loadTranscripts, onDataChanged, planAction, setPresent,
 } from './api'
 import { appointments, formatTime, scheduleFor, ymd } from './schedule'
 import { dateLabel, googleCalendarUrl, planTitle, timeLabel } from '../../shared/format.ts'
+import { longDate, monthGridHtml, monthStart, monthTitle, shiftMonth, type Mark } from './month.ts'
 import type { HaloData, Plan, TranscriptLine } from './types'
 
 // Care portal calendar: a month grid of plans HALO picked up from conversation and the appointments from
@@ -20,13 +22,11 @@ let online = true
 let editing: string | null = null
 const today = () => ymd(new Date())
 let selected = today()
-let view = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+let view = monthStart(new Date())
 const shown: Record<string, string> = {}
 
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const patientName = () => data.patient.name.split(' ')[0] || 'the patient'
 const dayOf = (iso: string) => ymd(new Date(iso))
-const long = (d: string) => new Date(`${d}T00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 
 // Only touch the page when what it shows has changed, so typing and focus are never disturbed
 function setHtml(id: string, html: string) {
@@ -107,39 +107,22 @@ function approvalItem(p: Plan): string {
 
 // ---- month grid -------------------------------------------------------------------------------------------
 
-type Mark = { time: string; label: string; cls: string }
-
 function marksFor(day: string): Mark[] {
   const out: Mark[] = []
   for (const p of plans) {
     if (dayOf(p.start) !== day || p.status === 'declined' || p.status === 'rejected') continue
-    out.push({ time: p.allDay ? '' : timeLabel(new Date(p.start)), label: planTitle(p), cls: p.status === 'confirmed' ? '' : 'pending' })
+    out.push({ time: p.allDay ? '' : timeLabel(new Date(p.start)), label: planTitle(p), cls: p.status === 'confirmed' ? '' : 'pending', at: p.allDay ? new Date(`${day}T00:00`).getTime() : new Date(p.start).getTime() })
   }
-  for (const a of appointments(data).filter(x => x.date === day)) out.push({ time: a.time ? formatTime(a.time) : '', label: a.title, cls: 'appt' })
-  return out.sort((a, b) => a.time.localeCompare(b.time))
+  for (const a of appointments(data).filter(x => x.date === day)) out.push({ time: a.time ? formatTime(a.time) : '', label: a.title, cls: 'appt', at: new Date(`${day}T${a.time ?? '00:00'}`).getTime() })
+  return out
 }
 
 function renderMonth() {
-  const first = new Date(view.getFullYear(), view.getMonth(), 1)
-  const start = new Date(first.getFullYear(), first.getMonth(), 1 - first.getDay())
-  const cells: string[] = DOW.map(d => `<div class="dow" role="columnheader">${d}</div>`)
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
-    const key = ymd(d)
-    const marks = marksFor(key)
-    const chips = marks.slice(0, 3).map(m => `<span class="chip ${m.cls}" title="${esc(`${m.time} ${m.label}`.trim())}">${m.time ? `${esc(m.time)} ` : ''}${esc(m.label)}</span>`).join('')
-    cells.push(`
-      <button type="button" class="day${d.getMonth() !== first.getMonth() ? ' out' : ''}${key === today() ? ' today' : ''}${key === selected ? ' sel' : ''}" data-act="day" data-day="${key}"
-        aria-label="${esc(long(key))}, ${marks.length} ${marks.length === 1 ? 'event' : 'events'}" aria-pressed="${key === selected}">
-        <span class="n">${d.getDate()}</span>${chips}${marks.length > 3 ? `<span class="more">+${marks.length - 3} more</span>` : ''}
-      </button>`)
-  }
-
   const dayPlans = plans.filter(p => dayOf(p.start) === selected && p.status === 'confirmed').sort((a, b) => a.start.localeCompare(b.start))
   const items = scheduleFor(data, new Date(`${selected}T12:00`)).filter(i => i.kind !== 'plan')
   const meds = items.filter(i => i.kind === 'medicine')
   const appts = items.filter(i => i.kind === 'appointment')
-  const upcomingMonth = view.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+  const upcomingMonth = monthTitle(view)
 
   setHtml('calendar', `
     <div class="month-head">
@@ -148,9 +131,9 @@ function renderMonth() {
       <button type="button" class="secondary" data-act="now">Today</button>
       <button type="button" class="secondary" data-act="next" aria-label="Next month">›</button>
     </div>
-    <div class="grid" role="grid" aria-label="${esc(upcomingMonth)}">${cells.join('')}</div>
+    ${monthGridHtml({ view, selected, today: today(), marksFor })}
     <p class="hint"><span class="chip">Confirmed</span> <span class="chip pending">Waiting for a yes</span> <span class="chip appt">Doctor appointment</span></p>
-    <h3>${esc(long(selected))}</h3>
+    <h3>${esc(longDate(selected))}</h3>
     ${dayPlans.length || appts.length ? `<ul class="list">${dayPlans.map(eventItem).join('')}${appts.map(a => `<li class="ev"><div><p><strong class="time">${a.time ? formatTime(a.time) : 'All day'}</strong> ${esc(a.title)}</p><p class="tags"><span class="tag">From a prescription</span></p></div></li>`).join('')}</ul>` : '<p class="empty hint">Nothing planned this day.</p>'}
     ${meds.length ? `<details><summary>Medicine times (${meds.length})</summary><ul class="list">${meds.map(m => `<li class="ev"><div><p><strong class="time">${m.time ? formatTime(m.time) : ''}</strong> ${esc(m.title)}</p></div></li>`).join('')}</ul></details>` : ''}`)
 }
@@ -255,10 +238,10 @@ function mount() {
       else if (act === 'edit') editing = id!
       else if (act === 'cancel') editing = null
       else if (act === 'present') await setPresent(present.includes(name!) ? present.filter(n => n !== name) : [...present, name!])
-      else if (act === 'day') { selected = day!; const d = new Date(`${day}T00:00`); if (d.getMonth() !== view.getMonth()) view = new Date(d.getFullYear(), d.getMonth(), 1) }
-      else if (act === 'prev') view = new Date(view.getFullYear(), view.getMonth() - 1, 1)
-      else if (act === 'next') view = new Date(view.getFullYear(), view.getMonth() + 1, 1)
-      else if (act === 'now') { selected = today(); view = new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
+      else if (act === 'day') { selected = day!; const d = new Date(`${day}T00:00`); if (d.getMonth() !== view.getMonth()) view = monthStart(d) }
+      else if (act === 'prev') view = shiftMonth(view, -1)
+      else if (act === 'next') view = shiftMonth(view, 1)
+      else if (act === 'now') { selected = today(); view = monthStart(new Date()) }
       else if (act === 'heard') {
         const li = document.getElementById(`line-${line}`)
         li?.scrollIntoView({ block: 'center', behavior: 'smooth' })

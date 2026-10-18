@@ -16,6 +16,7 @@ export type Medicine = {
   times: string[] // 24-hour "HH:MM"
   quantity: number | null
   refills: number | null
+  stopped?: boolean // no longer taken: hidden from the schedule and refills, but the numbering of the others stays
 }
 
 export type Appointment = {
@@ -33,7 +34,7 @@ export type PrescriptionReading = {
 
 export type Prescription = {
   id: string
-  file: string
+  file: string // '' when the family typed the medicine in by hand
   originalName: string
   doctor: string
   date: string
@@ -46,15 +47,12 @@ export type Prescription = {
 // Pills on hand as counted by the family, at a point in time
 export type Stock = { count: number; at: string }
 
-export type Refill = { status: 'approved' | 'dismissed'; at: string; pharmacy?: string; price?: number; via?: 'imessage' }
-
 export type HaloData = {
   patient: { name: string; zip?: string }
   people: Person[]
   prescriptions: Prescription[]
   // Keyed by medicine key ("<prescription id>:<index>")
   stock?: Record<string, Stock>
-  refills?: Record<string, Refill>
 }
 
 export type DoseSource = 'imessage' | 'glasses'

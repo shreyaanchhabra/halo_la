@@ -41,6 +41,7 @@ export function scheduleFor(data: HaloData, day: Date, plans: Plan[] = []): Sche
   for (const rx of data.prescriptions) {
     if (startDate(rx) > date) continue
     rx.reading?.medicines.forEach((m, i) => {
+      if (m.stopped) return
       for (const time of m.times) {
         items.push({
           time, title: `${m.name} ${m.strength}`.trim(), detail: m.instructions, kind: 'medicine',
@@ -74,6 +75,7 @@ export function buildIcs(data: HaloData, plans: Plan[] = []): string {
 
   for (const rx of data.prescriptions) {
     rx.reading?.medicines.forEach((m, i) => {
+      if (m.stopped) return
       // Repeat daily until this fill runs out, when the quantity is known
       const days = m.quantity && m.times.length ? Math.floor(m.quantity / m.times.length) : null
       for (const time of m.times) {

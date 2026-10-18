@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/browser'
 import { careOperation } from './operations'
+import type { RefillState } from '../../shared/refill-types.ts'
 import type { DoseLog, GlassesState, HaloData, ImessageStatus, Medicine, Plan, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -69,6 +70,7 @@ export const loadDoses = () => call<DoseLog[]>('/api/doses')
 export const setDose = (medKey: string, slot: string, taken: boolean) =>
   call('/api/doses', { method: 'POST', body: JSON.stringify({ medKey, slot, taken }) })
 
+export const clearPrices = (key: string) => call(`/api/prices?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
 export const loadPrices = () => call<Record<string, PriceCheck>>('/api/prices')
 
 export const loadImessage = () => call<ImessageStatus>('/api/imessage')
@@ -83,3 +85,10 @@ export function onDataChanged(cb: () => void) {
 }
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
+
+// ---- Refills ----
+export const loadRefills = () => call<RefillState>('/api/refills')
+export const refillAction = (id: string, op: 'approve' | 'reject' | 'requote' | 'received', body: object = {}) =>
+  call(`/api/refills/${id}/${op}`, { method: 'POST', body: JSON.stringify(body) })
+export const setRefillLimit = (spendingLimitCents: number) =>
+  call('/api/refills/settings', { method: 'PUT', body: JSON.stringify({ spendingLimitCents }) })
