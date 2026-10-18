@@ -52,6 +52,11 @@ describe('utterance segmenter', () => {
     assert.equal(got.length, 1)
   })
 
+  test('a longer pause ends the utterance', () => {
+    const got = run(join(quiet(500), tone(800), quiet(800), tone(800), quiet(1500)))
+    assert.equal(got.length, 2)
+  })
+
   test('background noise alone produces nothing', () => {
     assert.equal(run(quiet(10000, 120)).length, 0)
   })

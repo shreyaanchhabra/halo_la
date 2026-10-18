@@ -4,11 +4,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readPrescription, transcribe } from './server/ai'
 import { createGlasses } from './server/glasses'
+import { glassesMenu } from './server/glasses-menu'
 import { checkGoodRx } from './server/goodrx'
 import { calendarRoutes } from './server/calendar-routes.ts'
 import { refillRoutes } from './server/refill-routes.ts'
 import { createImessage, formatNumber } from './server/photon'
-import { finishRequest, initCareSentry, reportError, traceCareRequest, tracePriceLookup } from './server/sentry'
+import { finishRequest, initCareSentry, reportError, traceCareRequest, tracePriceLookup, traceStep } from './server/sentry'
+import { createVoices } from './server/voices.ts'
 import type { DoseLog, DoseSource, HaloData, ImessageStatus, Medicine, PriceCheck } from './src/types'
 
 const DATA_DIR = fileURLToPath(new URL('./data', import.meta.url))
@@ -20,13 +22,18 @@ const PRICES_FILE = path.join(DATA_DIR, 'prices.json')
 const IMESSAGE_FILE = path.join(DATA_DIR, 'imessage.json')
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json')
 const GLASSES_FILE = path.join(DATA_DIR, 'glasses.json')
+// Speaker recognition model, ~100 MB, not in git: npm run voice-model
+const MODEL_FILE = fileURLToPath(new URL('./models/nemo_en_titanet_large.onnx', import.meta.url))
+
+// /api/voices/guests/<id>, /api/voices/guests/<id>/clip, /api/voices/guests/<id>/name
+const voiceRoute = (pathname: string) => /^\/api\/voices\/guests\/([\w-]+)(?:\/(clip|name))?$/.exec(pathname)
 
 const readJson = <T>(file: string, fallback: T): T =>
   fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : fallback
 const writeJson = (file: string, value: unknown) => fs.writeFileSync(file, JSON.stringify(value, null, 2))
 
 const MIME: Record<string, string> = {
-  '.webm': 'audio/webm', '.mp4': 'audio/mp4', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
+  '.webm': 'audio/webm', '.wav': 'audio/wav', '.mp4': 'audio/mp4', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
   '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.heic': 'image/heic',
 }
 
@@ -63,7 +70,15 @@ function jsonStore(keys: Keys): Plugin {
       const notify = () => server.ws.send({ type: 'custom', event: 'halo:update' })
       const upload = (name: string | null) => path.join(UPLOADS, path.basename(name ?? ''))
       // Plans from conversation to calendar: /api/plans, /api/audio, /api/glasses/state, /api/transcripts (POST) and more
-      const calendar = calendarRoutes({ apiKey: groqKey, dataDir: DATA_DIR, notify, answerWindowMs: Number(process.env.HALO_ANSWER_WINDOW_MS) || undefined })
+      const calendar = calendarRoutes({
+        apiKey: groqKey, dataDir: DATA_DIR, notify, answerWindowMs: Number(process.env.HALO_ANSWER_WINDOW_MS) || undefined,
+        identify: wav => {
+          if (!voices.ready()) return () => ({ speaker: 'unknown' })
+          const clip = voices.prepare(wav)
+          return () => traceStep('Recognize the speaker', 'voice.identify', () => voices.assign(clip),
+            h => ({ 'voice.kind': h.kind, 'voice.score': Number((h.score ?? 0).toFixed(3)), 'voice.seconds': Number(clip.seconds.toFixed(1)) }))
+        },
+      })
       server.httpServer?.on('close', calendar.stop)
       // Refill before it runs out: pill count -> errands agent -> family approval -> order -> pickup on the calendar
       const refills = refillRoutes({ dataDir: DATA_DIR, notify, calendar: calendar.cal, browserUseKey: keys.browserUse })
@@ -104,6 +119,18 @@ function jsonStore(keys: Keys): Plugin {
         notify()
       }
       const glasses = createGlasses(GLASSES_FILE, notify)
+      const saveData = (data: HaloData) => { writeJson(DATA_FILE, data); notify() }
+
+      const voices = createVoices({
+        modelPath: MODEL_FILE, dataDir: DATA_DIR, uploadsDir: UPLOADS, groqKey,
+        readData, saveData,
+        lines: () => calendar.cal.lines(),
+        plans: () => calendar.cal.plans(),
+        renameSpeaker: (from, to) => calendar.cal.renameSpeaker(from, to),
+        notify,
+        onGuestReady: g => imessage?.askAboutGuest(g),
+      })
+      void voices.sync()
 
       const { projectId, apiKey, agentNumber } = keys.photon
       const imessage = projectId && apiKey && agentNumber
@@ -113,13 +140,14 @@ function jsonStore(keys: Keys): Plugin {
           stateFile: IMESSAGE_FILE,
           messagesFile: MESSAGES_FILE,
           readData,
-          saveData: data => { writeJson(DATA_FILE, data); notify() },
+          saveData,
           readDoses,
           readPrices: () => readJson<Record<string, PriceCheck>>(PRICES_FILE, {}),
           startPriceCheck,
           setDose,
           glasses,
           refills: refills.refills,
+          voices,
           notify,
         })
         : null
@@ -141,6 +169,7 @@ function jsonStore(keys: Keys): Plugin {
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2))
             refills.check() // a new pill count or prescription can start or cancel a refill
             notify()
+            void voices.sync()
             res.end('{"ok":true}')
           } else if (url.pathname === '/api/upload' && req.method === 'POST') {
             const name = path.basename(url.searchParams.get('name') ?? 'file').replace(/[^\w.-]/g, '_')
@@ -168,7 +197,26 @@ function jsonStore(keys: Keys): Plugin {
             res.end('{"ok":true}')
           } else if (url.pathname === '/api/glasses' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify(glasses.view(readData(), readDoses())))
+            const asking = calendar.cal.glassesState()
+            res.end(JSON.stringify({ ...glasses.view(readData(), readDoses()), person: voices.card(Date.now(), Boolean(asking.prompt || asking.resolved)) }))
+          } else if (url.pathname === '/api/glasses/menu' && req.method === 'GET') {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(glassesMenu(readData(), readDoses(), calendar.cal.plans(), new Date())))
+          } else if (url.pathname === '/api/voices' && req.method === 'GET') {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(voices.status()))
+          } else if (voiceRoute(url.pathname)?.[2] === 'clip' && req.method === 'GET') {
+            const clip = voices.clipFile(voiceRoute(url.pathname)![1])
+            if (!clip) { res.statusCode = 404; return res.end() }
+            res.setHeader('Content-Type', 'audio/wav')
+            fs.createReadStream(clip).pipe(res)
+          } else if (voiceRoute(url.pathname)?.[2] === 'name' && req.method === 'POST') {
+            const { name, relation, blurb } = JSON.parse((await readBody(req)).toString())
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(voices.nameGuest(voiceRoute(url.pathname)![1], { name: String(name ?? ''), relation: String(relation ?? ''), blurb: String(blurb ?? '') })))
+          } else if (voiceRoute(url.pathname) && !voiceRoute(url.pathname)![2] && req.method === 'DELETE') {
+            voices.forgetGuest(voiceRoute(url.pathname)![1])
+            res.end('{"ok":true}')
           } else if (url.pathname === '/api/glasses/seen' && req.method === 'POST') {
             const { id } = JSON.parse((await readBody(req)).toString())
             const seen = glasses.markSeen(String(id))

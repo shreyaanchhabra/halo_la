@@ -1,5 +1,5 @@
 import type { GlassesState } from '../shared/calendar.ts'
-import type { GlassesView } from '../portal/src/types.ts'
+import type { GlassesMenu, GlassesView } from '../portal/src/types.ts'
 
 // Empty in development: the dev server proxies /api to the HALO server. Set VITE_HALO_API
 // (e.g. http://192.168.1.20:8787) when building the packaged app.
@@ -16,6 +16,9 @@ export const getState = () => json<GlassesState>('/api/glasses/state')
 // Family messages from iMessage and doses that are due (portal/server/glasses.ts)
 export const getCare = () => json<GlassesView>('/api/glasses')
 
+// Appointments over the next 3 days, medicines and the family, for the menu (portal/server/glasses-menu.ts)
+export const getMenu = () => json<GlassesMenu>('/api/glasses/menu')
+
 const post = (path: string, body: object) =>
   json<unknown>(path, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
 
@@ -26,6 +29,9 @@ export type AudioReply = { kind: string; text: string; answer?: string; summary?
 
 export const postAudio = (wav: Uint8Array) =>
   json<AudioReply>('/api/audio', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } }, 25_000)
+
+export const postWho = (wav: Uint8Array) =>
+  json<AudioReply>('/api/audio/who', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } }, 4_000)
 
 export const postStats = (stats: object) =>
   json<unknown>('/api/audio/stats', { method: 'POST', body: JSON.stringify(stats), headers: { 'Content-Type': 'application/json' } })

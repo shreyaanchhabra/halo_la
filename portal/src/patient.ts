@@ -3,7 +3,8 @@ import './patient.css'
 import { initSentry } from './sentry'
 
 initSentry('patient')
-import { addTranscript, esc, fileUrl, loadAsk, loadData, loadDoses, loadPlans, loadRefills, loadTranscripts, onDataChanged, planAction, setDose } from './api'
+import { startLiveAudio, type LiveAudio } from './live-audio'
+import { esc, fileUrl, loadAsk, loadData, loadDoses, loadPlans, loadRefills, loadTranscripts, onDataChanged, planAction, setDose } from './api'
 import { allMedicines, runningLow, supply, supplyText } from './meds'
 import { longDate, monthGridHtml, monthStart, monthTitle, shiftMonth, type Mark } from './month.ts'
 import type { RefillState } from '../../shared/refill-types.ts'
@@ -154,7 +155,7 @@ function render() {
         <p class="who">${esc(p.name)}</p>
         <p class="relation">${esc(p.relation)}</p>
         ${p.blurb ? `<p>${esc(p.blurb)}</p>` : ''}
-        <audio controls preload="none" src="${fileUrl(p.voiceFile)}"></audio>
+        ${p.voiceFile ? `<audio controls preload="none" src="${fileUrl(p.voiceFile)}"></audio>` : ''}
         ${p.transcript ? `<details><summary>What ${esc(p.name.split(' ')[0])} said</summary><p>${esc(p.transcript)}</p></details>` : ''}
       </li>`).join('')
     : '<li class="empty">Your family will add people here.</li>'
@@ -182,7 +183,7 @@ function render() {
 
 function renderHeard() {
   $('heard').innerHTML = heard.slice(-8).reverse().map(l => `
-    <li><span class="time">${clockTime(l.at)}</span>${esc(l.text)}</li>`).join('')
+    <li><span class="time">${clockTime(l.at)}</span>${l.speaker && l.speaker !== 'unknown' ? `<b>${esc(l.speaker)}:</b> ` : ''}${esc(l.text)}</li>`).join('')
 }
 
 async function load() {
@@ -217,53 +218,39 @@ async function loadHeard() {
   renderHeard()
 }
 
-// ---- Live transcript with the browser's speech recognition ----
+// ---- Live transcript: each sentence is transcribed and matched to a saved voice on the HALO server ----
 
-const Recognition = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
 const listenBtn = $('listen-btn') as HTMLButtonElement
 const caption = $('live-caption')
-let listening = false
-let recognizer: any = null
+let live: LiveAudio | null = null
 
-function stopListening(message: string) {
-  listening = false
-  recognizer?.stop()
+async function stopListening(message: string) {
+  listenBtn.disabled = true
+  await live?.stop().catch(() => {})
+  live = null
+  listenBtn.disabled = false
   listenBtn.textContent = 'Start listening'
   listenBtn.classList.remove('on')
   caption.textContent = message
 }
 
-if (!Recognition) {
-  listenBtn.disabled = true
-  caption.textContent = "This browser can't transcribe speech. Open this page in Chrome or Safari."
-}
-
-listenBtn.addEventListener('click', () => {
-  if (listening) return stopListening('Paused.')
-
-  recognizer = new Recognition()
-  recognizer.continuous = true
-  recognizer.interimResults = true
-  recognizer.lang = 'en-US'
-  recognizer.onresult = (e: any) => {
-    let interim = ''
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const text = e.results[i][0].transcript.trim()
-      if (e.results[i].isFinal) {
-        if (text) addTranscript(text)
-      } else {
-        interim += `${text} `
-      }
-    }
-    caption.textContent = interim.trim() || 'Listening…'
+listenBtn.addEventListener('click', async () => {
+  if (live) return stopListening('Paused.')
+  try {
+    live = await startLiveAudio({
+      onHeard: clip => {
+        const who = clip.match && clip.match.kind !== 'unknown' && clip.match.kind !== 'guest' ? `${clip.match.speaker}: ` : ''
+        caption.textContent = `${who}${clip.text}`
+        void loadHeard()
+      },
+      onError: () => { caption.textContent = "Couldn't reach HALO. Still listening…" },
+    })
+  } catch (err) {
+    caption.textContent = (err as Error).name === 'NotAllowedError'
+      ? 'Microphone blocked. Allow microphone access in the browser and try again.'
+      : `Couldn't start the microphone: ${(err as Error).message}`
+    return
   }
-  recognizer.onerror = (e: any) => {
-    if (e.error === 'not-allowed') stopListening('Microphone blocked. Allow microphone access in the browser and try again.')
-  }
-  // The browser stops after a pause in speech; keep going until the patient presses Stop
-  recognizer.onend = () => { if (listening) recognizer.start() }
-  recognizer.start()
-  listening = true
   listenBtn.textContent = 'Stop listening'
   listenBtn.classList.add('on')
   caption.textContent = 'Listening…'

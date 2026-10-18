@@ -36,7 +36,12 @@ export type RoutesOptions = {
   dataDir: string
   notify?: () => void
   answerWindowMs?: number
+  // Starts working out who is speaking while the clip is transcribed; the returned function
+  // decides once we know the clip had words in it
+  identify?: (wav: Buffer) => () => SpeakerMatch
 }
+
+export type SpeakerMatch = { speaker: string; kind?: string; score?: number }
 
 export function calendarRoutes(o: RoutesOptions) {
   const haloFile = path.join(o.dataDir, 'halo.json')
@@ -66,13 +71,30 @@ export function calendarRoutes(o: RoutesOptions) {
     const route = `${req.method} ${url.pathname}`
     const body = async () => JSON.parse((await readBody(req)).toString() || '{}')
 
+    // Voiceprint only: who is talking, so the glasses can show the name before Whisper finishes
+    if (route === 'POST /api/audio/who') {
+      const wav = await readBody(req)
+      let match: SpeakerMatch = { speaker: 'unknown' }
+      try { match = o.identify?.(wav)?.() ?? match } catch (err) { console.error('[voices] could not read the clip:', String(err)) }
+      cal.noteSpeaker(match.speaker)
+      json(res, { match })
+      return true
+    }
+
     // Speech from the glasses: one finished utterance as a 16 kHz mono WAV
     if (route === 'POST /api/audio') {
       needKey()
       const c = care()
-      const text = await transcribeWav(await readBody(req), o.apiKey, { vocabulary: [...c.people.map(p => p.name), c.patient.split(' ')[0]] })
-      if (!text) { json(res, { kind: 'silence', text: '' }); return true }
-      json(res, describe(await cal.hear(text, String(req.headers['x-speaker'] ?? 'unknown'))))
+      const wav = await readBody(req)
+      const names = [...c.people.flatMap(p => [p.name, p.name.split(' ')[0]]), c.patient, c.patient.split(' ')[0]]
+      const transcribing = transcribeWav(wav, o.apiKey, { vocabulary: names })
+      let speakerOf: (() => SpeakerMatch) | undefined
+      try { speakerOf = o.identify?.(wav) } catch (err) { console.error('[voices] could not read the clip:', String(err)) }
+      const match = speakerOf?.() ?? { speaker: String(req.headers['x-speaker'] ?? 'unknown') }
+      cal.noteSpeaker(match.speaker)
+      const text = await transcribing
+      if (!text) { json(res, { kind: 'silence', text: '', speaker: match.speaker, match }); return true }
+      json(res, { ...describe(await cal.hear(text, match.speaker)), speaker: match.speaker, match })
       return true
     }
 

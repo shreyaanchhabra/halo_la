@@ -51,10 +51,10 @@ describe('Scheduler picks out calendar plans only', live, () => {
   beforeEach(() => { cal = fresh() })
 
   const plans: [string, string, RegExp, string][] = [
-    ["I'll come by Saturday at 2 and we'll go to the park", 'Maya', /park/, 'Sat, Oct 24, 2:00 PM'],
-    ["I'm taking you to the dentist on Tuesday at 9:30 in the morning", 'Maya', /dentist/, 'Tue, Oct 20, 9:30 AM'],
-    ["Let's have dinner together tomorrow at 6", 'Maya', /dinner/, 'Sun, Oct 18, 6:00 PM'],
-    ['Paul and I will pick you up on Friday at 11 for the barbecue', 'Maya', /barbecue|pick/, 'Fri, Oct 23, 11:00 AM'],
+    ['Set an event for Saturday at 2 and we will go to the park', 'Maya', /park/, 'Sat, Oct 24, 2:00 PM'],
+    ['Set an event for the dentist on Tuesday at 9:30 in the morning', 'Maya', /dentist/, 'Tue, Oct 20, 9:30 AM'],
+    ['Set an event for dinner together tomorrow at 6', 'Maya', /dinner/, 'Sun, Oct 18, 6:00 PM'],
+    ['Set an event for the barbecue on Friday at 11, Paul and I will pick you up', 'Maya', /barbecue|pick/, 'Fri, Oct 23, 11:00 AM'],
   ]
   for (const [text, speaker, activity, when] of plans) {
     test(`plan: "${text}"`, async () => {
@@ -89,7 +89,7 @@ describe('Scheduler picks out calendar plans only', live, () => {
   }
 
   test('patient is never listed as a participant', async () => {
-    const out = await cal.hear("Joe, I'll come by Saturday at 2", 'Maya', NOW)
+    const out = await cal.hear('Set an event for Saturday at 2, Joe', 'Maya', NOW)
     assert.equal(out.kind, 'proposed')
     if (out.kind === 'proposed') assert.ok(!out.plan.who.map(w => w.toLowerCase()).includes('joe'))
   })
@@ -97,7 +97,7 @@ describe('Scheduler picks out calendar plans only', live, () => {
 
 describe('ask, answer, timeout', live, () => {
   beforeEach(() => { cal = fresh() })
-  const SAY = "I'll come by Saturday at 2 and we'll go to the park"
+  const SAY = 'Set an event for Saturday at 2 and we will go to the park'
 
   test('proposal shows on the glasses; saying yes adds it to the calendar', async () => {
     await cal.hear(SAY, 'Maya', NOW)
@@ -151,7 +151,7 @@ describe('ask, answer, timeout', live, () => {
 
   test('a second plan waits its turn', async () => {
     await cal.hear(SAY, 'Maya', NOW)
-    const second = await cal.hear("And I'll take you to the dentist on Tuesday at 9:30 am", 'Maya', at(5))
+    const second = await cal.hear('Set an event for the dentist on Tuesday at 9:30 am', 'Maya', at(5))
     assert.equal(second.kind, 'queued')
     await cal.hear('yes', 'Joe', at(10))
     const s = cal.glassesState(at(11))
@@ -177,7 +177,7 @@ describe('ask, answer, timeout', live, () => {
 
 describe('naming who the plan is with, before voice recognition exists', live, () => {
   beforeEach(() => { cal = fresh() })
-  const SAY = "I'll come by Saturday at 2 and we'll go to the park"
+  const SAY = 'Set an event for Saturday at 2 and we will go to the park'
 
   test('unknown speaker, one visitor listed: "I" is that visitor', async () => {
     cal.setPresent(['Maya'])
@@ -193,7 +193,7 @@ describe('naming who the plan is with, before voice recognition exists', live, (
   })
 
   test('a name that is actually said is used even when nobody is listed', async () => {
-    const out = await cal.hear('Maya and Paul are taking you to the park on Saturday at 2', 'unknown', NOW)
+    const out = await cal.hear('Set an event for the park on Saturday at 2 with Maya and Paul', 'unknown', NOW)
     assert.equal(out.kind, 'proposed')
     if (out.kind === 'proposed') assert.deepEqual([...out.plan.who].sort(), ['Maya', 'Paul'])
   })
@@ -212,7 +212,7 @@ describe('naming who the plan is with, before voice recognition exists', live, (
 
 describe('questions that propose a plan are asked straight away', live, () => {
   beforeEach(() => { cal = fresh() })
-  const ASK = 'Do you want to meet today at 6 PM at the basketball court?'
+  const ASK = 'Set an event for basketball today at 6 PM'
 
   test('the question itself is put to the patient, and one yes adds it', async () => {
     const out = await cal.hear(ASK, 'Maya', NOW)
@@ -244,6 +244,44 @@ describe('questions that propose a plan are asked straight away', live, () => {
   })
 })
 
+describe('calendar waits for the set-an-event command', () => {
+  test('casual talk with a time is ignored without calling the model', async () => {
+    const cal = createCalendar({ apiKey: 'not-a-key', dataDir: ':memory:', care: () => care })
+    const out = await cal.hear("I'll come by Saturday at 2 and we'll go to the park", 'Maya', NOW)
+    assert.equal(out.kind, 'ignored')
+    assert.equal('error' in out ? out.error : undefined, undefined)
+    assert.equal(cal._db().plans.length, 0)
+  })
+})
+
+describe('the glasses see who is talking before any words', () => {
+  test('noteSpeaker puts the name on the glasses, and hear fills in the text', async () => {
+    const cal = createCalendar({ apiKey: 'not-a-key', dataDir: ':memory:', care: () => ({
+      ...care,
+      people: [{ name: 'Maya', relation: 'granddaughter', blurb: 'Studies art in Chicago. Visits on Sundays.' }],
+    }) })
+    cal.noteSpeaker('Maya', NOW)
+    const who = cal.glassesState(NOW).heard
+    assert.equal(who?.text, '')
+    assert.deepEqual(who?.speaker, { name: 'Maya', relation: 'granddaughter', patient: false, blurb: 'Studies art in Chicago' })
+    const hearing = cal.hear('What a lovely park', 'Maya', NOW)
+    assert.equal(cal.glassesState(NOW).heard?.text, 'What a lovely park')
+    assert.equal(cal.glassesState(NOW).heard?.speaker?.name, 'Maya')
+    await hearing
+  })
+})
+
+describe('the glasses see what was heard straight away', () => {
+  test('before the plan check has answered', async () => {
+    const cal = createCalendar({ apiKey: 'not-a-key', dataDir: ':memory:', care: () => care })
+    const hearing = cal.hear('What a lovely park', 'Maya', NOW)
+    const h = cal.glassesState(at(0)).heard
+    assert.equal(h?.text, 'What a lovely park')
+    assert.deepEqual(h?.speaker, { name: 'Maya', relation: 'granddaughter', patient: false })
+    await hearing
+  })
+})
+
 describe('the glasses are told what was heard', live, () => {
   beforeEach(() => { cal = fresh() })
 
@@ -252,6 +290,15 @@ describe('the glasses are told what was heard', live, () => {
     const h = cal.glassesState(at(2)).heard
     assert.equal(h?.text, 'Remember to take your tablet at 2 this afternoon')
     assert.equal(h?.note, 'Not a calendar plan')
+    assert.deepEqual(h?.speaker, { name: 'Maya', relation: 'granddaughter', patient: false })
+  })
+
+  test('says who it was: the patient, a saved person, or no one for a voice it could not place', async () => {
+    const who = async (speaker: string) => { await cal.hear('What a lovely park', speaker, NOW); return cal.glassesState(at(1)).heard?.speaker }
+    assert.deepEqual(await who('Joe Martinez'), { name: 'Joe Martinez', relation: '', patient: true })
+    assert.deepEqual(await who('Maya'), { name: 'Maya', relation: 'granddaughter', patient: false })
+    assert.equal(await who('unknown'), null)
+    assert.equal(await who('Guest 2'), null)
   })
 
   test('it disappears after a few seconds', async () => {
@@ -261,7 +308,7 @@ describe('the glasses are told what was heard', live, () => {
   })
 
   test('when a question is on screen, the question takes the screen instead', async () => {
-    await cal.hear("I'll come by Saturday at 2 and we'll go to the park", 'Maya', NOW)
+    await cal.hear('Set an event for Saturday at 2 and we will go to the park', 'Maya', NOW)
     const s = cal.glassesState(at(1))
     assert.ok(s.prompt)
     assert.equal(s.heard, null)

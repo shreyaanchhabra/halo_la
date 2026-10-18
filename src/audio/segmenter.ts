@@ -20,6 +20,7 @@ export type SegmenterOptions = {
   preRollMs: number // audio kept from before speech was noticed, so the first syllable isn't clipped
   minSpeechMs: number // shorter than this is a cough or a click, and is dropped
   maxUtteranceMs: number // cut a monologue here
+  partialAfterMs: number // fire onPartial once when speech has lasted this long; 0 means never
 }
 
 export const DEFAULT_OPTIONS: SegmenterOptions = {
@@ -32,11 +33,12 @@ export const DEFAULT_OPTIONS: SegmenterOptions = {
   calibrationMs: 500,
   noiseWindowMs: 4000,
   noisePercentile: 0.25,
-  endSilenceMs: 700,
+  endSilenceMs: 650,
   keepTailMs: 200,
   preRollMs: 300,
   minSpeechMs: 250,
   maxUtteranceMs: 15000,
+  partialAfterMs: 0,
 }
 
 export type SegmenterStats = {
@@ -73,6 +75,8 @@ export class UtteranceSegmenter {
   private readonly o: SegmenterOptions
   private readonly frameBytes: number
   private readonly onUtterance: (pcm: Uint8Array) => void
+  private readonly onPartial?: (pcm: Uint8Array) => void
+  private partialSent = false
 
   private leftover: Uint8Array = new Uint8Array(0)
   private recent: number[] = [] // RMS of recent frames outside utterances
@@ -88,9 +92,10 @@ export class UtteranceSegmenter {
   private utterances = 0
   private dropped = 0
 
-  constructor(onUtterance: (pcm: Uint8Array) => void, options: Partial<SegmenterOptions> = {}) {
+  constructor(onUtterance: (pcm: Uint8Array) => void, options: Partial<SegmenterOptions> & { onPartial?: (pcm: Uint8Array) => void } = {}) {
     this.o = { ...DEFAULT_OPTIONS, ...options }
     this.onUtterance = onUtterance
+    this.onPartial = options.onPartial
     this.frameBytes = Math.round((this.o.sampleRate * this.o.frameMs) / 1000) * 2
   }
 
@@ -167,6 +172,10 @@ export class UtteranceSegmenter {
     // The background level is held while someone is talking, so speech can't raise it
     this.current.push(frame)
     if (rms > this.sustainThreshold()) { this.voicedMs += o.frameMs; this.silenceMs = 0 } else this.silenceMs += o.frameMs
+    if (!this.partialSent && o.partialAfterMs > 0 && this.current.length * o.frameMs >= o.partialAfterMs) {
+      this.partialSent = true
+      this.onPartial?.(concat(this.current))
+    }
     if (this.silenceMs >= o.endSilenceMs || this.current.length * o.frameMs >= o.maxUtteranceMs) this.finish()
   }
 
@@ -180,5 +189,6 @@ export class UtteranceSegmenter {
     this.voicedRun = 0
     this.voicedMs = 0
     this.silenceMs = 0
+    this.partialSent = false
   }
 }

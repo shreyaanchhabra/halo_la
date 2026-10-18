@@ -48,7 +48,7 @@ export type Prescription = {
 export type Stock = { count: number; at: string }
 
 export type HaloData = {
-  patient: { name: string; zip?: string }
+  patient: { name: string; zip?: string; voiceFile?: string }
   people: Person[]
   prescriptions: Prescription[]
   // Keyed by medicine key ("<prescription id>:<index>")
@@ -100,6 +100,43 @@ export type GlassesView = {
   due: { medKey: string; slot: string; title: string; time: string; detail: string } | null
   next: { title: string; time: string; kind: 'medicine' | 'appointment' | 'plan' } | null
   appointment: { title: string; date: string; time: string | null } | null
+  person?: VoiceCard | null
+}
+
+// The glasses menu: appointments over the next few days, today's medicines, and the family
+export type GlassesMenu = {
+  appointments: { title: string; date: string; time: string | null }[]
+  medicines: { title: string; times: string[]; takenToday: number; daysLeft: number | null; low: boolean }[]
+  family: { name: string; relation: string }[]
+}
+
+// Shown on the glasses for a few seconds when HALO recognizes who started talking
+export type VoiceCard = { name: string; relation: string; fact: string }
+
+// What /api/audio says about one utterance from a microphone
+export type HeardClip = {
+  kind: string // 'silence', 'ignored', 'proposed', 'answer', ...
+  text: string
+  speaker?: string
+  match?: {
+    speaker: string
+    kind?: 'person' | 'patient' | 'guest' | 'unknown'
+    score?: number
+    closest?: { speaker: string; score: number }
+    short?: boolean
+  }
+  summary?: string
+}
+
+// A voice HALO heard but doesn't know yet
+export type VoiceGuest = { id: string; label: string; firstHeard: string; lastHeard: string; seconds: number; lines: number; hasClip: boolean }
+
+export type VoiceStatus = {
+  ready: boolean
+  problem?: string
+  patientEnrolled: boolean
+  enrolled: string[] // person ids with a voiceprint
+  guests: VoiceGuest[]
 }
 
 export type ImessageStatus = {

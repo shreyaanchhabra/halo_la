@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/browser'
 import { careOperation } from './operations'
 import type { RefillState } from '../../shared/refill-types.ts'
-import type { DoseLog, GlassesState, HaloData, ImessageStatus, Medicine, Plan, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
+import type { DoseLog, GlassesState, HaloData, HeardClip, ImessageStatus, Medicine, Person, Plan, PriceCheck, PrescriptionReading, TranscriptLine, VoiceStatus } from './types'
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? 'GET'
@@ -74,6 +74,18 @@ export const clearPrices = (key: string) => call(`/api/prices?key=${encodeURICom
 export const loadPrices = () => call<Record<string, PriceCheck>>('/api/prices')
 
 export const loadImessage = () => call<ImessageStatus>('/api/imessage')
+
+// ---- Voices HALO recognizes ----
+export const loadVoices = () => call<VoiceStatus>('/api/voices')
+export const guestClipUrl = (id: string) => `/api/voices/guests/${id}/clip`
+export const nameGuest = (id: string, person: { name: string; relation: string; blurb: string }) =>
+  call<Person>(`/api/voices/guests/${id}/name`, json('POST', person))
+// One utterance from the browser's microphone, as a 16 kHz WAV: transcribed and matched to a saved voice
+export const postAudio = (wav: Uint8Array) =>
+  call<HeardClip>('/api/audio', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } })
+export const postWho = (wav: Uint8Array) =>
+  call<HeardClip>('/api/audio/who', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } })
+export const forgetGuest = (id: string) => call(`/api/voices/guests/${id}`, json('DELETE'))
 
 // Starts a Browser Use lookup on GoodRx; the result arrives later through onDataChanged
 export const checkPrices = (key: string, med: Medicine, zip: string) =>

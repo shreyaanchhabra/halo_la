@@ -69,6 +69,19 @@ button.secondary { background: var(--card); color: var(--accent); }
 .reading td:first-child { font-weight: 600; white-space: nowrap; }
 .reading ul { margin: 0; padding-left: 18px; }
 .table-scroll { overflow-x: auto; }
+.tag.ok { background: #e3f1e8; border-color: #a9d1b6; color: #1f4d30; }
+.live-test h3 { margin: 1.25rem 0 0.25rem; font-size: 1rem; }
+#live-btn.on { background: #a12a2a; border-color: #a12a2a; color: #fff; }
+.live-lines { list-style: none; padding: 0; margin: 0.75rem 0 0; display: grid; gap: 0.5rem; }
+.live-lines li { border-left: 3px solid var(--rule); padding: 0.25rem 0 0.25rem 0.75rem; }
+.live-lines li.person { border-left-color: #3b8a57; }
+.live-lines li.patient { border-left-color: #3b6a8a; }
+.live-lines li.guest { border-left-color: #b8862b; }
+.live-lines .who { font-size: 0.85rem; color: var(--muted); }
+.live-lines .who b { color: inherit; }
+#voices h3 { margin: 1.25rem 0 0.25rem; font-size: 1rem; }
+.name-guest { margin-top: 0.75rem; }
+#pv-saved audio { display: block; margin-top: 0.5rem; }
 .status { color: var(--muted); font-size: 0.9rem; }
 .status.error { color: #a12a2a; }
 details { font-size: 0.9rem; color: var(--muted); }

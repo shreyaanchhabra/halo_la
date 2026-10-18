@@ -3,11 +3,12 @@ import { createHash } from 'node:crypto'
 import { Photon } from '@photon-ai/api'
 import { allMedicines, daysLeft, pillsLeft, refillDue, type MedEntry } from '../src/meds'
 import { appointments, formatTime, scheduleFor, ymd } from '../src/schedule'
-import type { DoseLog, DoseSource, GlassesMessage, HaloData, ImessageStatus, Medicine, PriceCheck, TextAlertKind, TextMessage } from '../src/types'
+import type { DoseLog, DoseSource, GlassesMessage, HaloData, ImessageStatus, Medicine, PriceCheck, TextAlertKind, TextMessage, VoiceGuest } from '../src/types'
 import { answerCaregiver, type CaregiverAction } from './ai'
 import type { Glasses } from './glasses'
 import { RefillError, type Refills } from './refills.ts'
 import { formatCents } from '../../shared/refill-types.ts'
+import type { Voices } from './voices'
 import { traceTask } from './sentry'
 
 const POLL_MS = 3_000
@@ -59,6 +60,7 @@ export type ImessageDeps = {
   setDose: (medKey: string, slot: string, taken: boolean, by?: DoseSource) => void
   glasses: Glasses
   refills: Refills // GoodRx refills the family approves here or in the portal
+  voices?: Pick<Voices, 'guests' | 'nameGuest'>
   notify: () => void
 }
 
@@ -187,6 +189,10 @@ export function createImessage(deps: ImessageDeps) {
     lines.push('', "Doctor's notes:", ...(notes.length ? notes.map(n => `- ${n}`) : ['- none']))
     lines.push('', 'Family and visitors:', ...(data.people.length
       ? data.people.map(p => `- ${p.name} (${p.relation})`) : ['- none']))
+    const guests = deps.voices?.guests() ?? []
+    lines.push('', 'New voices waiting for a name:', ...(guests.length
+      ? guests.map(g => `- ${g.label}: first heard ${clock(g.firstHeard)}, last heard ${clock(g.lastHeard)}, talked ${g.seconds < 60 ? `${g.seconds} seconds` : `about ${Math.round(g.seconds / 60)} min`}`)
+      : ['- none']))
     lines.push('', `Patient ZIP code: ${data.patient.zip || 'not set'}`)
     return lines.join('\n')
   }
@@ -239,6 +245,32 @@ export function createImessage(deps: ImessageDeps) {
     return `Okay, ${joinNames(names) || 'that dose'} ${names.length > 1 ? 'are' : 'is'} back to not taken.`
   }
 
+  function nameGuest(patient: string, a: Extract<CaregiverAction, { type: 'name_guest' }>): string {
+    const guests = deps.voices?.guests() ?? []
+    if (!guests.length) return "There's no new voice waiting for a name right now. You can add people in the HALO portal."
+    const g = a.guest
+      ? guests.find(x => x.label.toLowerCase() === a.guest!.toLowerCase())
+      : guests.length === 1 ? guests[0] : undefined
+    if (!g) {
+      const list = joinNames(guests.map(x => `${x.label} (around ${clock(x.lastHeard)})`))
+      return `I've heard ${guests.length} new voices: ${list}. Which one is ${a.name}? Reply like "${guests[0].label} is ${a.name}".`
+    }
+    let p
+    try { p = deps.voices!.nameGuest(g.id, { name: a.name, relation: a.relation }) } catch (err) { return err instanceof Error ? err.message : String(err) }
+    return `Saved ${p.name}${p.relation ? ` (${p.relation})` : ''}. I'll recognize their voice from now on and remind ${patient} who they are.`
+  }
+
+  // A voice that has talked with the patient for a while: ask the family who it is, once
+  function askAboutGuest(g: VoiceGuest) {
+    const name = (deps.readData().patient.name || 'the patient').split(' ')[0]
+    const text = `Someone new has been talking with ${name} since ${clock(g.firstHeard)}. `
+      + `If you know who it is, reply with their name and how they know ${name}, like "That's Raj, a neighbor", and I'll recognize them from now on.`
+    const listening = state.caregivers.filter(c => !c.paused)
+    if (!listening.length) return
+    void traceTask('Ask the family about a new voice', 'imessage.guest', () =>
+      Promise.all(listening.map(c => send(c, text, `guest:${g.id}`).catch(failed))))
+  }
+
   function runAction(c: Caregiver, action: CaregiverAction): Reply | null {
     const data = deps.readData()
     const name = (data.patient.name || 'the patient').split(' ')[0]
@@ -254,6 +286,7 @@ export function createImessage(deps: ImessageDeps) {
     }
     if (action.type === 'mark_taken') return { text: markTaken(c, data, action.medKey, action.time) }
     if (action.type === 'undo_taken') return { text: undoTaken(c) }
+    if (action.type === 'name_guest') return { text: nameGuest(name, action) }
     if (action.type === 'send_to_glasses') {
       const m = deps.glasses.add(action.text, c.handle)
       return {
@@ -481,6 +514,7 @@ export function createImessage(deps: ImessageDeps) {
     },
     checkAlerts: () => checkAlerts().catch(setError),
     glassesSeen: (m: GlassesMessage) => glassesSeen(m).catch(() => {}),
+    askAboutGuest,
     status(): ImessageStatus {
       const alerts: ImessageStatus['alerts'] = {}
       for (const a of Object.values(state.alerts)) {

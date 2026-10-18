@@ -3,14 +3,16 @@ import { initSentry } from './sentry'
 
 initSentry('care')
 import {
-  checkPrices, clearPrices, esc, fileUrl, loadData, loadDoses, loadImessage, loadPlans, loadPrices, loadRefills, onDataChanged, readPrescription, refillAction,
+  checkPrices, clearPrices, esc, fileUrl, forgetGuest, guestClipUrl, loadData, loadDoses, loadImessage, loadPlans, loadPrices, loadRefills,
+  loadVoices, nameGuest, onDataChanged, readPrescription, refillAction,
   planAction, removeFile, saveData, setDose, setRefillLimit, transcribe, uploadFile,
 } from './api'
 import { allMedicines, daysLeft, parseTimes, pillsLeft, refillDue, runningLow, supplyText, type MedEntry } from './meds'
 import { downloadIcs, formatTime, ymd } from './schedule'
 import { formatCents, type RefillState } from '../../shared/refill-types.ts'
 import { dateLabel, planTitle, startOfDay, timeLabel } from '../../shared/format.ts'
-import type { DoseLog, HaloData, ImessageStatus, Plan, PriceCheck, Prescription, TextAlertKind, TextMessage } from './types'
+import { matchLabel, startLiveAudio, startWhoAudio, type LiveAudio } from './live-audio'
+import type { DoseLog, HaloData, HeardClip, ImessageStatus, Person, Plan, PriceCheck, Prescription, TextAlertKind, TextMessage, VoiceStatus } from './types'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -22,6 +24,9 @@ let plans: Plan[] = []
 const APPROVER_KEY = 'halo.approver'
 const approver = () => { try { return localStorage.getItem(APPROVER_KEY) ?? '' } catch { return '' } }
 let imessage: ImessageStatus | null = null
+let voices: VoiceStatus | null = null
+// The unrecognized voice whose "Name this person" form is open
+let naming: string | null = null
 // Prescriptions and people with a request to Groq in progress
 const busy = new Set<string>()
 // The medicine ("<rx>:<n>") or prescription being edited in place
@@ -51,7 +56,10 @@ const editRxForm = (r: Prescription) => `
   </form>`
 
 async function load() {
-  ;[data, doses, prices, refillState, plans, imessage] = await Promise.all([loadData(), loadDoses(), loadPrices(), loadRefills().catch(() => null), loadPlans().catch(() => [] as Plan[]), loadImessage().catch(() => null)])
+  ;[data, doses, prices, refillState, plans, imessage, voices] = await Promise.all([
+    loadData(), loadDoses(), loadPrices(), loadRefills().catch(() => null), loadPlans().catch(() => [] as Plan[]),
+    loadImessage().catch(() => null), loadVoices().catch(() => null),
+  ])
   for (const [id, value] of [['patient-name', data.patient.name], ['patient-zip', data.patient.zip ?? '']]) {
     const input = $<HTMLInputElement>(id)
     if (document.activeElement !== input) input.value = value
@@ -315,21 +323,72 @@ function renderImessage() {
       </li>`).join('')}</ol>` : ''}`
 }
 
+const firstName = () => (data.patient.name || 'the patient').split(' ')[0]
+
+function voiceTag(p: Person) {
+  if (!voices?.ready || !p.voiceFile) return ''
+  return voices.enrolled.includes(p.id) ? '<span class="tag ok">voice learned</span>' : '<span class="tag">learning voice…</span>'
+}
+
+function renderPatientVoice() {
+  const saved = $('pv-saved')
+  if (!data.patient.voiceFile) { saved.textContent = ''; return }
+  saved.innerHTML = `${voices?.patientEnrolled ? `HALO knows ${esc(firstName())}'s voice.` : 'Saved. HALO is learning the voice…'}
+    <audio controls src="${fileUrl(data.patient.voiceFile)}"></audio>`
+}
+
+function renderVoices() {
+  const el = $('voices')
+  if (!voices) { el.innerHTML = ''; return }
+  if (!voices.ready) { el.innerHTML = `<p class="status error">Voice recognition is off: ${esc(voices.problem ?? 'unknown problem')}</p>`; return }
+  if (!voices.guests.length) { el.innerHTML = ''; return }
+  el.innerHTML = `
+    <h3>Voices HALO doesn't know yet</h3>
+    <p class="hint">Heard through the glasses in the last week. Name someone and HALO recognizes them from then on, including what they already said.</p>
+    <ul class="list">${voices.guests.map(g => `
+      <li>
+        <div>
+          <strong>${esc(g.label)}</strong>
+          <span class="tag">${g.seconds < 60 ? `talked ${g.seconds}s` : `talked about ${Math.round(g.seconds / 60)} min`} · ${g.lines} ${g.lines === 1 ? 'sentence' : 'sentences'}</span>
+          <p>First heard ${shortDate(g.firstHeard)} · last heard ${shortDate(g.lastHeard)}</p>
+          ${g.hasClip ? `<audio controls preload="none" src="${guestClipUrl(g.id)}"></audio>` : ''}
+          ${naming === g.id ? `
+            <form data-name-guest="${g.id}" class="name-guest">
+              <div class="row">
+                <label>Name <input name="name" required placeholder="Raj" /></label>
+                <label>Relation <input name="relation" placeholder="Neighbor" /></label>
+              </div>
+              <label>About them <textarea name="blurb" rows="2" placeholder="Lives next door. Brings the newspaper."></textarea></label>
+              <button type="submit">Save person</button>
+              <button type="button" class="link" data-cancel-naming>Cancel</button>
+            </form>` : ''}
+        </div>
+        <div class="actions">
+          ${naming === g.id ? '' : `<button class="link" data-name="${g.id}">Name this person</button>`}
+          <button class="link" data-forget-guest="${g.id}">Forget</button>
+        </div>
+      </li>`).join('')}
+    </ul>`
+}
+
 function render() {
   renderPlans()
   renderImessage()
+  renderPatientVoice()
+  renderVoices()
   $('people').innerHTML = data.people.length
     ? data.people.map(p => `
       <li>
         <div>
-          <strong>${esc(p.name)}</strong> <span class="tag">${esc(p.relation)}</span>
+          <strong>${esc(p.name)}</strong> <span class="tag">${esc(p.relation)}</span> ${voiceTag(p)}
           ${p.blurb ? `<p>${esc(p.blurb)}</p>` : ''}
-          <audio controls src="${fileUrl(p.voiceFile)}"></audio>
+          ${p.voiceFile ? `<audio controls src="${fileUrl(p.voiceFile)}"></audio>` : ''}
           ${busy.has(p.id) ? '<p class="status">Transcribing…</p>'
             : p.transcript ? `<details><summary>What they said</summary>${esc(p.transcript)}</details>` : ''}
         </div>
         <div class="actions">
-          <button class="link" data-transcribe="${p.id}">${p.transcript ? 'Transcribe again' : 'Transcribe'}</button>
+          ${p.voiceFile ? `<button class="link" data-transcribe="${p.id}">${p.transcript ? 'Transcribe again' : 'Transcribe'}</button>` : ''}
+          <button class="link" data-rerecord="${p.id}">Re-record</button>
           <button class="link" data-del-person="${p.id}">Remove</button>
         </div>
       </li>`).join('')
@@ -402,60 +461,148 @@ $('ics-btn').addEventListener('click', async () => downloadIcs(data, await loadP
 
 // Voice recording
 const MAX_SECONDS = 30
-let recorder: MediaRecorder | null = null
-let recording: Blob | null = null
-let timer = 0
 
-const recBtn = $<HTMLButtonElement>('rec-btn')
-const recStatus = $('rec-status')
-const recPreview = $<HTMLAudioElement>('rec-preview')
-
-function resetRecording() {
-  recording = null
-  recPreview.hidden = true
-  recPreview.removeAttribute('src')
-  recStatus.textContent = 'No recording yet'
-  recBtn.textContent = '● Record voice'
+function voiceRecorder(prefix: string, idleLabel: string, onRecorded: (blob: Blob) => void = () => {}) {
+  const btn = $<HTMLButtonElement>(`${prefix}-btn`)
+  const status = $(`${prefix}-status`)
+  const preview = $<HTMLAudioElement>(`${prefix}-preview`)
+  let recorder: MediaRecorder | null = null
+  let timer = 0
+  const r = {
+    blob: null as Blob | null,
+    status,
+    reset() {
+      r.blob = null
+      preview.hidden = true
+      preview.removeAttribute('src')
+      status.textContent = 'No recording yet'
+      btn.textContent = idleLabel
+    },
+  }
+  btn.addEventListener('click', async () => {
+    if (recorder?.state === 'recording') {
+      recorder.stop()
+      return
+    }
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      status.textContent = 'Microphone blocked. Allow microphone access in the browser and try again.'
+      return
+    }
+    const chunks: Blob[] = []
+    recorder = new MediaRecorder(stream)
+    recorder.ondataavailable = e => chunks.push(e.data)
+    recorder.onstop = () => {
+      clearInterval(timer)
+      stream.getTracks().forEach(t => t.stop())
+      r.blob = new Blob(chunks, { type: recorder!.mimeType })
+      preview.src = URL.createObjectURL(r.blob)
+      preview.hidden = false
+      status.textContent = 'Recorded. Play it back to check, or record again.'
+      btn.textContent = '● Record again'
+      onRecorded(r.blob)
+    }
+    recorder.start()
+    const started = Date.now()
+    btn.textContent = '■ Stop'
+    status.textContent = `Recording… 0s / ${MAX_SECONDS}s`
+    timer = setInterval(() => {
+      const s = Math.floor((Date.now() - started) / 1000)
+      status.textContent = `Recording… ${s}s / ${MAX_SECONDS}s`
+      if (s >= MAX_SECONDS) recorder?.stop()
+    }, 250)
+  })
+  return r
 }
 
-recBtn.addEventListener('click', async () => {
-  if (recorder?.state === 'recording') {
-    recorder.stop()
+const extFor = (blob: Blob) => (blob.type.includes('mp4') ? 'mp4' : 'webm')
+const personRec = voiceRecorder('rec', '● Record voice')
+const recStatus = personRec.status
+
+// The patient's own voice is saved as soon as it's recorded
+const patientRec = voiceRecorder('pv', "● Record patient's voice", async blob => {
+  const old = data.patient.voiceFile
+  data.patient.voiceFile = await uploadFile(blob, `patient.${extFor(blob)}`)
+  await saveData(data)
+  if (old) await removeFile(old).catch(() => {})
+  patientRec.status.textContent = 'Saved. HALO is learning the voice…'
+})
+
+// Listen live: the browser mic, matched against the saved samples
+const liveBtn = $<HTMLButtonElement>('live-btn')
+const liveStatus = $('live-status')
+let live: LiveAudio | null = null
+
+function addLiveLine(clip: HeardClip) {
+  const li = document.createElement('li')
+  li.className = clip.match?.kind ?? 'unknown'
+  const time = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+  li.innerHTML = `<div class="who"><b>${esc(matchLabel(clip))}</b> · ${time}</div>
+    <div>${esc(clip.text)}</div>${clip.summary ? `<div class="hint">Plan heard: ${esc(clip.summary)}</div>` : ''}`
+  $('live-lines').prepend(li)
+  liveStatus.textContent = 'Listening…'
+}
+
+liveBtn.addEventListener('click', async () => {
+  if (live) {
+    liveBtn.disabled = true
+    liveStatus.textContent = 'Finishing the last sentence…'
+    await live.stop().catch(() => {})
+    live = null
+    liveBtn.disabled = false
+    liveBtn.textContent = '● Listen live'
+    liveBtn.classList.remove('on')
+    liveStatus.textContent = 'Stopped.'
     return
   }
-  let stream: MediaStream
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  } catch {
-    recStatus.textContent = 'Microphone blocked. Allow microphone access in the browser and try again.'
+    live = await startLiveAudio({
+      onHeard: addLiveLine,
+      onSending: () => { liveStatus.textContent = 'Transcribing and matching…' },
+      onError: err => { liveStatus.textContent = `Couldn't send that: ${(err as Error).message}` },
+    })
+  } catch (err) {
+    liveStatus.textContent = (err as Error).name === 'NotAllowedError'
+      ? 'Microphone blocked. Allow microphone access in the browser and try again.'
+      : `Couldn't start the microphone: ${(err as Error).message}`
     return
   }
-  const chunks: Blob[] = []
-  recorder = new MediaRecorder(stream)
-  recorder.ondataavailable = e => chunks.push(e.data)
-  recorder.onstop = () => {
-    clearInterval(timer)
-    stream.getTracks().forEach(t => t.stop())
-    recording = new Blob(chunks, { type: recorder!.mimeType })
-    recPreview.src = URL.createObjectURL(recording)
-    recPreview.hidden = false
-    recStatus.textContent = 'Recorded. Play it back to check, or record again.'
-    recBtn.textContent = '● Record again'
+  liveBtn.textContent = '■ Stop listening'
+  liveBtn.classList.add('on')
+  liveStatus.textContent = voices && !voices.ready ? 'Listening, but voice matching is off (see below).' : 'Listening…'
+})
+
+const whoBtn = $<HTMLButtonElement>('who-btn')
+let who: LiveAudio | null = null
+whoBtn.addEventListener('click', async () => {
+  if (who) {
+    await who.stop().catch(() => {})
+    who = null
+    whoBtn.textContent = 'Test match'
+    liveStatus.textContent = 'Stopped.'
+    return
   }
-  recorder.start()
-  const started = Date.now()
-  recBtn.textContent = '■ Stop'
-  recStatus.textContent = `Recording… 0s / ${MAX_SECONDS}s`
-  timer = setInterval(() => {
-    const s = Math.floor((Date.now() - started) / 1000)
-    recStatus.textContent = `Recording… ${s}s / ${MAX_SECONDS}s`
-    if (s >= MAX_SECONDS) recorder?.stop()
-  }, 250)
+  try {
+    who = await startWhoAudio({
+      onHeard: clip => { liveStatus.textContent = matchLabel(clip) },
+      onError: err => { liveStatus.textContent = `Couldn't match that: ${(err as Error).message}` },
+    })
+  } catch (err) {
+    liveStatus.textContent = (err as Error).name === 'NotAllowedError'
+      ? 'Microphone blocked. Allow microphone access in the browser and try again.'
+      : `Couldn't start the microphone: ${(err as Error).message}`
+    return
+  }
+  whoBtn.textContent = '■ Stop test'
+  liveStatus.textContent = 'Say a sentence. This names you without adding it to the calendar.'
 })
 
 // People
 $<HTMLFormElement>('person-form').addEventListener('submit', async e => {
   e.preventDefault()
+  const recording = personRec.blob
   if (!recording) {
     recStatus.textContent = 'Record a voice sample before saving.'
     return
@@ -463,7 +610,7 @@ $<HTMLFormElement>('person-form').addEventListener('submit', async e => {
   const saveBtn = $<HTMLButtonElement>('person-save')
   saveBtn.disabled = true
   const name = $<HTMLInputElement>('p-name').value.trim()
-  const ext = recording.type.includes('mp4') ? 'mp4' : 'webm'
+  const ext = extFor(recording)
   const id = crypto.randomUUID()
   data.people.push({
     id,
@@ -475,7 +622,7 @@ $<HTMLFormElement>('person-form').addEventListener('submit', async e => {
   })
   await saveData(data)
   ;(e.target as HTMLFormElement).reset()
-  resetRecording()
+  personRec.reset()
   saveBtn.disabled = false
   render()
   transcribePerson(id)
@@ -507,10 +654,21 @@ $<HTMLFormElement>('rx-form').addEventListener('submit', async e => {
 // List buttons
 document.addEventListener('click', async e => {
   const {
-    delPerson, delRx, readRx: readId, transcribe: transcribeId, prices: pricesKey,
+    delPerson, delRx, readRx: readId, transcribe: transcribeId, rerecord, prices: pricesKey,
     refillApprove, refillReject, refillRequote, refillReceived, price, doseTake, doseUndo, planApprove, planReject,
     edit, cancelEdit, stopMed, restartMed, hidePrices,
+    name: nameId, forgetGuest: forgetId, cancelNaming,
   } = (e.target as HTMLElement).dataset
+  if (nameId || cancelNaming !== undefined) {
+    naming = nameId ?? null
+    renderVoices()
+    document.querySelector<HTMLInputElement>('.name-guest input')?.focus()
+    return
+  }
+  if (forgetId) {
+    await forgetGuest(forgetId)
+    return load()
+  }
   if (hidePrices) { delete prices[hidePrices]; render(); await clearPrices(hidePrices).catch(() => {}); return }
   if (edit) { editing = edit; return render() }
   if (cancelEdit !== undefined) { editing = null; return render() }
@@ -531,6 +689,21 @@ document.addEventListener('click', async e => {
   }
   if (readId) return readRx(readId)
   if (transcribeId) return transcribePerson(transcribeId)
+  if (rerecord) {
+    const person = data.people.find(p => p.id === rerecord)
+    const recording = personRec.blob
+    if (!person || !recording) {
+      recStatus.textContent = 'Record a new sample above, then click Re-record.'
+      return
+    }
+    const old = person.voiceFile
+    person.voiceFile = await uploadFile(recording, `${person.name || 'voice'}.${extFor(recording)}`)
+    await saveData(data)
+    if (old) await removeFile(old).catch(() => {})
+    personRec.reset()
+    recStatus.textContent = `Saved a new sample for ${person.name}. HALO is folding it into their voice.`
+    return render()
+  }
   if (pricesKey) return startPriceCheck(pricesKey)
   if (refillApprove) {
     if (!approver().trim()) {
@@ -655,6 +828,23 @@ $<HTMLFormElement>('med-form').addEventListener('submit', async e => {
 // A new pill count starts the refill cycle over
 document.addEventListener('submit', async e => {
   const form = e.target as HTMLFormElement
+  const guestId = form.dataset.nameGuest
+  if (guestId) {
+    e.preventDefault()
+    const f = new FormData(form)
+    const button = form.querySelector<HTMLButtonElement>('button[type=submit]')!
+    button.disabled = true
+    try {
+      const person = await nameGuest(guestId, { name: String(f.get('name') ?? ''), relation: String(f.get('relation') ?? ''), blurb: String(f.get('blurb') ?? '') })
+      naming = null
+      await load()
+      if (person.voiceFile) void transcribePerson(person.id)
+    } catch (err) {
+      button.disabled = false
+      form.insertAdjacentHTML('beforeend', `<p class="status error">${esc((err as Error).message)}</p>`)
+    }
+    return
+  }
   const key = form.dataset.stock
   if (!key) return
   e.preventDefault()
@@ -667,7 +857,7 @@ document.addEventListener('submit', async e => {
 })
 
 // Reload when data changes elsewhere, unless a request from this page is still running
-onDataChanged(() => { if (!busy.size && !editing) load() })
+onDataChanged(() => { if (!busy.size && !editing && !naming) load() })
 
 load()
 

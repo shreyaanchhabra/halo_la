@@ -1,7 +1,9 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildScreen, fit, inLabel } from './screens.ts'
-import type { GlassesState, Plan } from '../shared/calendar.ts'
+import { getTextWidth } from '@evenrealities/pretext'
+import { buildScreen, detailScreen, fit, inLabel, layoutForDisplay, MAX_LINES, MENU, TEXT_WIDTH_PX } from './screens.ts'
+import type { GlassesState, HeardSpeaker, Plan } from '../shared/calendar.ts'
+import type { GlassesMenu } from '../portal/src/types.ts'
 
 const now = new Date('2026-10-24T10:02:00')
 const plan = (o: Partial<Plan>): Plan => ({
@@ -25,7 +27,7 @@ describe('glasses screens', () => {
   test('long lists are capped', () => {
     const today = [1, 2, 3, 4, 5, 6].map(n => plan({ id: String(n), start: `2026-10-24T${10 + n}:00:00` }))
     const s = buildScreen({ ...base, state: state({ today }) })
-    assert.match(s, /\+2 more/)
+    assert.match(s, /\+3 more/)
   })
 
   test('events that started over an hour ago drop off the list', () => {
@@ -81,26 +83,53 @@ describe('glasses screens', () => {
     assert.ok(s.length < 1000)
   })
 
-  test('what was heard is shown under today\'s plans, with why nothing happened', () => {
-    const s = buildScreen({ ...base, state: state({ heard: { text: 'Remember to take your tablet at 2', note: 'Not a calendar plan' } }) })
-    assert.match(s, /Heard:\nRemember to take your tablet at 2\n\(Not a calendar plan\)/)
+  const maya = { name: 'Maya', relation: 'Granddaughter', patient: false }
+
+  test('before the words arrive, the name and the family\'s line are shown', () => {
+    const s = buildScreen({ ...base, state: state({ heard: { text: '', note: '', speaker: { ...maya, blurb: 'Studies art in Chicago' } } }) })
+    assert.match(s, /Maya, your granddaughter:/)
+    assert.match(s, /Studies art in Chicago/)
+    assert.doesNotMatch(s, /Unknown/)
   })
 
-  test('a long sentence is wrapped to two lines and cut with ...', () => {
-    const s = buildScreen({ ...base, state: state({ heard: { text: 'I think that on the whole we should probably go to the park and then have lunch somewhere nice afterwards', note: '' } }) })
+  test('what was heard is shown under today\'s plans: who said it, then what they said', () => {
+    const s = buildScreen({ ...base, state: state({ heard: { text: 'Remember to take your tablet at 2', note: 'Not a calendar plan', speaker: maya } }) })
+    assert.match(s, /\n\nMaya, your granddaughter:\nRemember to take your tablet at 2\nTap then hold for menu$/)
+  })
+
+  test('the patient is "You", and a voice no one knows is "Unknown"', () => {
+    const said = (speaker: HeardSpeaker | null | undefined) => buildScreen({ ...base, state: state({ heard: { text: 'Hello', note: '', speaker } }) })
+    assert.match(said({ name: 'Joe Martinez', relation: '', patient: true }), /\nYou:\nHello\n/)
+    assert.match(said({ name: 'Raj', relation: '', patient: false }), /\nRaj:\nHello\n/)
+    assert.match(said(null), /\nUnknown:\nHello\n/)
+    assert.match(said(undefined), /\nUnknown:\nHello\n/)
+  })
+
+  test('a long sentence is cut to one line with ...', () => {
+    const s = buildScreen({ ...base, state: state({ heard: { text: 'I think that on the whole we should probably go to the park and then have lunch somewhere nice afterwards', note: '', speaker: maya } }) })
     const lines = s.split('\n')
-    const at = lines.indexOf('Heard:')
+    const at = lines.indexOf('Maya, your granddaughter:')
     assert.ok(at > 0)
-    assert.ok(lines[at + 2].endsWith('...'), lines[at + 2])
+    assert.ok(lines[at + 1].endsWith('...'), lines[at + 1])
+    assert.ok(!lines[at + 1].endsWith('....'), lines[at + 1])
     for (const l of lines) assert.ok(l.length <= 34, `"${l}" is ${l.length}`)
+    const exact = buildScreen({ ...base, state: state({ heard: { text: "Let's sit down and catch up for a while.", note: '', speaker: maya } }) })
+    assert.match(exact, /\nLet's sit down and catch up for\.\.\.\n/)
+  })
+
+  test('a long name and relation still fit on one line', () => {
+    const s = buildScreen({ ...base, state: state({ heard: { text: 'Hi', note: '', speaker: { name: 'Maximilian-Alexander', relation: 'great-grandson', patient: false } } }) })
+    const label = s.split('\n').find(l => l.endsWith(':'))!
+    assert.ok(label.length <= 34, label)
   })
 
   test('plans give way to the heard text so everything fits the display', () => {
     const today = [1, 2, 3, 4].map(n => plan({ id: String(n), start: `2026-10-24T${12 + n}:00:00` }))
-    const s = buildScreen({ ...base, state: state({ today, heard: { text: 'Do you want to meet at 6', note: 'Not a calendar plan' } }) })
-    assert.ok(s.split('\n').length <= 10, `${s.split('\n').length} lines`)
-    assert.match(s, /Heard:/)
-    assert.match(s, /more/)
+    const s = buildScreen({ ...base, state: state({ today, heard: { text: 'Do you want to meet at 6', note: 'Not a calendar plan', speaker: maya } }) })
+    assert.ok(s.split('\n').length <= MAX_LINES, `${s.split('\n').length} lines`)
+    assert.match(s, /Maya, your granddaughter:/)
+    assert.match(s, /1 PM/)
+    assert.doesNotMatch(s, /4 PM/)
   })
 
   test('a notice from the device (a clip that could not be sent) is shown', () => {
@@ -140,5 +169,136 @@ describe('family messages and doses', () => {
     const prompt = { id: 'p1', lines: ['Park with Maya at 2 PM?', 'Say yes or no'], expiresAt: now.toISOString() }
     assert.match(buildScreen({ ...base, state: state({ prompt }), care: message }), /Park with Maya/)
     assert.match(buildScreen({ ...base, state: state(), reminder: plan({}), care: dose }), /^Coming up/)
+  })
+})
+
+describe('laying out for the display', () => {
+  const lines = (s: string) => s.split('\n')
+
+  test('each line is centered across the 568 px text area', () => {
+    for (const l of lines(layoutForDisplay('This is\n\nRaj\nYour neighbor')).filter(Boolean)) {
+      const pad = l.length - l.trimStart().length
+      const left = pad * getTextWidth(' ')
+      const right = TEXT_WIDTH_PX - left - getTextWidth(l.trimStart())
+      assert.ok(Math.abs(left - right) <= 2 * getTextWidth(' '), `${JSON.stringify(l)}: ${left} vs ${right}`)
+    }
+  })
+
+  test('a short screen sits in the middle, top to bottom, and keeps its blank lines', () => {
+    const out = lines(layoutForDisplay('This is\n\nRaj\nYour neighbor'))
+    assert.equal(out.length, 2 + 4)
+    assert.deepEqual(out.slice(0, 2), ['', ''])
+    assert.equal(out[3], '')
+  })
+
+  test('words get twice the usual gap, and nothing is wider than the display', () => {
+    const out = layoutForDisplay(buildScreen({ ...base, state: state(), care: { kind: 'message', id: 'm', text: 'Your family is coming over at 5 tomorrow, and bringing your favourite tea.' } }))
+    assert.match(out, /Message {2}from {2}family/)
+    for (const l of lines(out)) assert.ok(getTextWidth(l) <= TEXT_WIDTH_PX, l)
+    assert.ok(lines(out).length <= MAX_LINES)
+  })
+
+  test('a full screen gets no extra lines on top', () => {
+    const full = Array.from({ length: MAX_LINES }, (_, n) => `Line ${n + 1}`).join('\n')
+    assert.equal(lines(layoutForDisplay(full)).length, MAX_LINES)
+    assert.match(lines(layoutForDisplay(full))[0], /Line {2}1$/)
+  })
+})
+
+describe('the menu', () => {
+  const menu: GlassesMenu = {
+    appointments: [
+      { title: 'Maya: park', date: '2026-10-24', time: '14:00' },
+      { title: 'Dr Lee checkup', date: '2026-10-25', time: '09:30' },
+      { title: 'Blood test', date: '2026-10-27', time: null },
+    ],
+    medicines: [
+      { title: 'Donepezil 5 mg', times: ['08:00', '20:00'], takenToday: 1, daysLeft: 29, low: false },
+      { title: 'Memantine 10 mg', times: ['09:00'], takenToday: 0, daysLeft: 5, low: true },
+    ],
+    family: [{ name: 'Maya', relation: 'Daughter' }, { name: 'Raj', relation: '' }],
+  }
+  const body = (s: string) => s.split('\n')
+  // Every page of a menu item, one after another
+  const allPages = (page: Parameters<typeof detailScreen>[0], m = menu) =>
+    Array.from({ length: detailScreen(page, m, now, 0).pages }, (_, n) => detailScreen(page, m, now, n).text.split('\n').slice(2, -3).filter(Boolean).join('\n')).join('\n')
+
+  test('home says how to open the menu', () => {
+    assert.match(buildScreen({ ...base, state: state() }), /Tap then hold for menu$/)
+  })
+
+  test('nothing else on screen offers the menu: a card that wants the tap keeps it', () => {
+    const message = { kind: 'message' as const, id: 'm1', text: 'Hi' }
+    assert.doesNotMatch(buildScreen({ ...base, state: state(), care: message }), /menu/)
+    assert.doesNotMatch(buildScreen({ ...base, mic: 'paused', state: state() }), /menu/)
+  })
+
+  test('the glasses menu starts with Today (home), then the three pages, with ids it accepts', () => {
+    assert.deepEqual(MENU.map(m => m.label), ['Today', 'Appointments', 'Medications', 'Family'])
+    assert.deepEqual(MENU.map(m => m.page), [null, 'appointments', 'medications', 'family'])
+    assert.equal(new Set(MENU.map(m => m.id)).size, MENU.length)
+    assert.ok(MENU.every(m => Number.isInteger(m.id) && m.id > 0))
+  })
+
+  test('appointments are grouped by day, with times', () => {
+    assert.match(detailScreen('appointments', menu, now, 0).text, /^Appointments\n\nToday\n/)
+    assert.match(detailScreen('appointments', menu, now, 0).text, /Tap: back$/)
+    assert.equal(allPages('appointments'), 'Today\n2 PM  Maya: park\nTomorrow\n9:30 AM  Dr Lee checkup\nTue 27 Oct\nAll day  Blood test')
+  })
+
+  test('medications show their times, today\'s doses, and which are running low', () => {
+    assert.match(detailScreen('medications', menu, now, 0).text, /^Medications\n\n1 is running low\n/)
+    const s = allPages('medications')
+    assert.match(s, /Donepezil 5 mg\n8 AM, 8 PM {2}\(1 of 2 taken\)/)
+    assert.match(s, /Memantine 10 mg\n9 AM {2}\(0 of 1 taken\)\n! Running low: 5 days left/)
+  })
+
+  test('family members with how they are related', () => {
+    const s = detailScreen('family', menu, now, 0).text
+    assert.equal(s, 'Family\n\nMaya, your daughter\nRaj\n\nTap: back')
+  })
+
+  test('empty pages say so, and a page still loading says that', () => {
+    const none: GlassesMenu = { appointments: [], medicines: [], family: [] }
+    assert.match(detailScreen('appointments', none, now, 0).text, /No appointments in the\nnext 3 days/)
+    assert.match(detailScreen('medications', none, now, 0).text, /No medicines/)
+    assert.match(detailScreen('family', none, now, 0).text, /No family/)
+    assert.match(detailScreen('family', null, now, 0).text, /Loading/)
+  })
+
+  test('a long page is split, says how to see more, and every page fits the display', () => {
+    const many: GlassesMenu = { ...menu, family: Array.from({ length: 12 }, (_, n) => ({ name: `Person ${n + 1}`, relation: 'friend' })) }
+    const first = detailScreen('family', many, now, 0)
+    assert.ok(first.pages > 1)
+    assert.match(first.text, /Swipe for more {2}1\/\d/)
+    for (let p = 0; p < first.pages; p++) {
+      const { text } = detailScreen('family', many, now, p)
+      assert.ok(body(layoutForDisplay(text)).length <= MAX_LINES, text)
+      assert.match(text, /Tap: back$/)
+    }
+    assert.match(detailScreen('family', many, now, first.pages - 1).text, /Person 12/)
+    const heights = Array.from({ length: first.pages }, (_, p) => body(detailScreen('family', many, now, p).text).length)
+    assert.equal(new Set(heights).size, 1, `every page the same height: ${heights}`)
+    assert.equal(detailScreen('family', many, now, 99).text, detailScreen('family', many, now, first.pages - 1).text)
+  })
+})
+
+describe('who is talking', () => {
+  const maya = { name: 'Maya', relation: 'granddaughter', fact: 'Coming to the park with you on Saturday' }
+
+  test('shows the name, how they are related, and one recent fact', () => {
+    const s = buildScreen({ ...base, state: state(), person: maya })
+    assert.equal(s, ['This is', '', 'Maya', 'Your granddaughter', '', 'Coming to the park with you on', 'Saturday'].join('\n'))
+  })
+
+  test('comes before a waiting message, but after a question', () => {
+    const message = { kind: 'message' as const, id: 'm1', text: 'Hi' }
+    assert.match(buildScreen({ ...base, state: state(), person: maya, care: message }), /^This is/)
+    const prompt = { id: 'p1', lines: ['Park with Maya at 2 PM?', 'Say yes or no'], expiresAt: now.toISOString() }
+    assert.match(buildScreen({ ...base, state: state({ prompt }), person: maya }), /^Park with Maya/)
+  })
+
+  test('works without a relation or fact', () => {
+    assert.equal(buildScreen({ ...base, state: state(), person: { name: 'Raj', relation: '', fact: '' } }), 'This is\n\nRaj')
   })
 })

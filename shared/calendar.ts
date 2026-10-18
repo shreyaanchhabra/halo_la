@@ -31,11 +31,15 @@ export type Plan = {
   conflictWith?: string // plan id that overlaps in time
 }
 
+export type HeardSpeaker = { name: string; relation: string; patient: boolean; blurb?: string }
+
 export type GlassesState = {
   now: string
   prompt: { id: string; lines: string[]; expiresAt: string } | null
   resolved: { id: string; status: PlanStatus; text: string } | null // answered in the last few seconds
-  heard: { text: string; note: string } | null // the last thing HALO heard, so the wearer can see it understood
+  // The last thing HALO heard and who said it, so the wearer can see it understood. speaker is null for a
+  // voice HALO couldn't place; a guest has their label ("Guest 2") as the name and no relation.
+  heard: { text: string; note: string; speaker?: HeardSpeaker | null } | null
   today: Plan[] // confirmed, starting today, soonest first
   upcoming: Plan[] // confirmed, starting within the next hour (for reminders)
 }

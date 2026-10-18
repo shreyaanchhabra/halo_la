@@ -26,6 +26,17 @@
           <label>ZIP code <input id="patient-zip" inputmode="numeric" maxlength="5" placeholder="90024" /></label>
         </div>
         <p class="hint">The ZIP code is used to look up pharmacy prices on GoodRx.</p>
+
+        <div class="recorder">
+          <p class="hint">Record the patient reading this aloud, so HALO knows when they are the one talking and never shows them a card about themselves.</p>
+          <p class="passage">"Good morning. I had a cup of tea and read the paper. Later I might go for a short walk in the garden, if the weather stays nice."</p>
+          <div class="rec-controls">
+            <button type="button" id="pv-btn">● Record patient's voice</button>
+            <span id="pv-status" class="hint">No recording yet</span>
+          </div>
+          <audio id="pv-preview" controls hidden></audio>
+          <p id="pv-saved" class="hint"></p>
+        </div>
       </section>
 
       <section class="card">
@@ -36,7 +47,7 @@
 
       <section class="card">
         <h2>People HALO should recognize</h2>
-        <p class="hint">Each person records a short voice sample so HALO can tell who is talking.</p>
+        <p class="hint">Each person records a short voice sample so HALO can tell who is talking. To replace a sample, record above, then click Re-record on that person. Test match names you without adding the sentence to the calendar.</p>
 
         <form id="person-form">
           <div class="row">
@@ -58,6 +69,19 @@
         </form>
 
         <ul id="people" class="list"></ul>
+
+        <div class="live-test">
+          <h3>Listen live</h3>
+          <p class="hint">Talk near this computer. Each sentence is transcribed and matched against the voice samples above, the same way the glasses do it. What's heard is added to the conversation HALO keeps, so plans can still be picked up.</p>
+          <div class="rec-controls">
+            <button type="button" id="live-btn">● Listen live</button>
+            <button type="button" id="who-btn">Test match</button>
+            <span id="live-status" class="hint"></span>
+          </div>
+          <ol id="live-lines" class="live-lines"></ol>
+        </div>
+
+        <div id="voices"></div>
       </section>
 
       <section class="card">

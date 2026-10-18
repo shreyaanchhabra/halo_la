@@ -189,10 +189,10 @@ function mount() {
 
   $('conversation').innerHTML = `
     <h2>Conversation</h2>
-    <p class="hint">What HALO has heard. Type a sentence to try it without speaking.</p>
+    <p class="hint">What HALO has heard. Type a sentence to try it without speaking. Plans start with “Set an event for …”.</p>
     <form id="say-form" class="say">
       <label>Speaker <select id="say-speaker"></select></label>
-      <label>Says <input id="say-text" required autocomplete="off" placeholder="I'll come by Saturday at 2 and we'll go to the park" /></label>
+      <label>Says <input id="say-text" required autocomplete="off" placeholder="Set an event for soccer tomorrow at 4 PM" /></label>
       <button type="submit" id="say-btn">Send</button>
     </form>
     <p class="hint" id="say-result" role="status"></p>

@@ -98,6 +98,7 @@ export type CaregiverAction =
   | { type: 'mark_taken'; medKey: string | null; time: string | null }
   | { type: 'undo_taken' }
   | { type: 'send_to_glasses'; text: string }
+  | { type: 'name_guest'; name: string; relation: string; guest: string | null }
 
 const CAREGIVER_PROMPT = `You are HALO, a care assistant texting on iMessage with a family caregiver.
 Answer only from the care record below. If the record doesn't say, say you don't know.
@@ -117,7 +118,11 @@ Set "action" only when the caregiver clearly asks for one of these, using a medi
 {"type": "send_to_glasses", "text": "..."}
   When they ask you to tell, remind, or pass something on to the patient. The patient reads it on their glasses.
   Rewrite it as one short, warm sentence spoken to the patient, under 120 characters. Never put medical changes in it.
-  Call the sender "your family" unless they give their name.`
+  Call the sender "your family" unless they give their name.
+{"type": "name_guest", "name": "...", "relation": "...", "guest": "Guest 2" or null}
+  When they tell you who a new, unrecognized voice is ("That's Raj, his neighbor", "Guest 2 is Aunt Meena").
+  name is the person's name as they gave it; relation is how they know the patient, lowercase ("neighbor", "aunt"), or "" if not said.
+  guest is the label from "New voices waiting for a name" only if they say which one; otherwise null.`
 
 export async function answerCaregiver(
   apiKey: string,
@@ -164,6 +169,7 @@ export async function answerCaregiver(
       : a?.type === 'pause_alerts' || a?.type === 'resume_alerts' || a?.type === 'undo_taken' ? { type: a.type }
       : a?.type === 'mark_taken' ? { type: a.type, medKey: str(a.medKey), time: /^\d{2}:\d{2}$/.test(a.time ?? '') ? a.time : null }
       : a?.type === 'send_to_glasses' && str(a.text) ? { type: a.type, text: str(a.text)!.slice(0, 200) }
+      : a?.type === 'name_guest' && str(a.name) ? { type: a.type, name: str(a.name)!.slice(0, 60), relation: (str(a.relation) ?? '').slice(0, 40), guest: str(a.guest) }
       : null
   return { reply: String(parsed.reply ?? '').trim(), action }
 }

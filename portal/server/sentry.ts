@@ -67,6 +67,16 @@ export async function traceTask(name: string, op: string, fn: () => Promise<unkn
   }))
 }
 
+// One step inside the current request, with what it decided (e.g. who spoke, and how sure)
+export function traceStep<T>(name: string, op: string, fn: () => T, attributes?: (result: T) => Record<string, string | number>): T {
+  if (!enabled) return fn()
+  return Sentry.startSpan({ name, op }, span => {
+    const result = fn()
+    if (attributes) span.setAttributes(attributes(result))
+    return result
+  })
+}
+
 export function tracePriceLookup(fn: () => Promise<unknown>): void {
   void traceTask('Look up GoodRx prices', 'pharmacy.lookup', fn)
 }

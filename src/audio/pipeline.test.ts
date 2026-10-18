@@ -110,6 +110,25 @@ describe('audio pipeline', () => {
     assert.ok(peak > 3000, `peak ${peak}`)
   })
 
+  test('a who-prefix goes out once after 0.8 s of speech, then the full clip at the end', async () => {
+    const partials: number[] = []
+    const sent: number[] = []
+    const p = new AudioPipeline({
+      send: async w => { sent.push(dataLen(w)) },
+      onPartial: w => { partials.push(dataLen(w)) },
+    })
+    feed(p, hiss(2000), tone(300))
+    assert.equal(partials.length, 0)
+    feed(p, tone(400))
+    assert.equal(partials.length, 1)
+    feed(p, tone(200))
+    assert.equal(partials.length, 1)
+    feed(p, hiss(1500))
+    await p.drained()
+    assert.equal(sent.length, 1)
+    assert.ok(sent[0] > partials[0], `full ${sent[0]} vs prefix ${partials[0]}`)
+  })
+
   test('flush sends an utterance that was still being spoken', async () => {
     const sent: Uint8Array[] = []
     const p = new AudioPipeline({ send: async w => { sent.push(w) } })

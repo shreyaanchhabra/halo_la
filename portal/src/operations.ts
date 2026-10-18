@@ -1,6 +1,6 @@
 // Names for the care actions already in the portal, used as trace labels.
 export function careOperation(method: string, pathname: string): string {
-  const path = pathname.replace(/\/api\/files\/.*$/, '/api/files')
+  const path = pathname.replace(/\/api\/files\/.*$/, '/api/files').replace(/\/api\/voices\/guests\/[\w-]+/, '/api/voices/guests/:id')
   const names: Record<string, string> = {
     'GET /api/data': 'Load the care record',
     'PUT /api/data': 'Save the care record',
@@ -15,7 +15,14 @@ export function careOperation(method: string, pathname: string): string {
     'POST /api/prices': 'Check pharmacy prices',
     'GET /api/imessage': 'Load family texts',
     'GET /api/glasses': 'Update the glasses',
+    'GET /api/glasses/menu': 'Open the glasses menu',
     'POST /api/glasses/seen': 'Message seen on glasses',
+    'POST /api/audio': 'Hear speech from the glasses',
+    'POST /api/audio/who': 'Recognize who is speaking',
+    'GET /api/voices': 'Load recognized voices',
+    'GET /api/voices/guests/:id/clip': 'Play an unrecognized voice',
+    'POST /api/voices/guests/:id/name': 'Name an unrecognized voice',
+    'DELETE /api/voices/guests/:id': 'Forget an unrecognized voice',
     'GET /api/files': 'Open an uploaded file',
     'DELETE /api/files': 'Remove an uploaded file',
   }

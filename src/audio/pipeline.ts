@@ -11,6 +11,7 @@ export type PipelineStats = SegmenterStats & {
 
 type Options = {
   send: (wav: Uint8Array) => Promise<void>
+  onPartial?: (wav: Uint8Array) => void // 1.2 s of speech, so the glasses can ask who before the sentence ends
   segmenter?: Partial<SegmenterOptions>
   maxQueue?: number
   retryDelaysMs?: number[] // waits before each retry of a failed upload
@@ -38,7 +39,11 @@ export class AudioPipeline {
     this.maxQueue = o.maxQueue ?? 5
     this.retryDelaysMs = o.retryDelaysMs ?? [1500, 3000]
     this.onError = o.onError ?? (() => {})
-    this.segmenter = new UtteranceSegmenter(pcm => this.enqueue(pcm), o.segmenter)
+    this.segmenter = new UtteranceSegmenter(pcm => this.enqueue(pcm), {
+      ...o.segmenter,
+      partialAfterMs: o.onPartial ? 800 : 0,
+      onPartial: o.onPartial ? pcm => o.onPartial!(pcmToWav(boostQuiet(pcm))) : undefined,
+    })
   }
 
   push(pcm: Uint8Array) {

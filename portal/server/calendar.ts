@@ -1,9 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { extractPlan } from './extract.ts'
+import { extractPlan, sameActivity } from './extract.ts'
 import { parseAnswer } from './yesno.ts'
 import { planTitle, startOfDay, whenLabel } from '../../shared/format.ts'
-import type { GlassesState, Plan, PlanStatus, TranscriptLine } from '../../shared/calendar.ts'
+import type { GlassesState, HeardSpeaker, Plan, PlanStatus, TranscriptLine } from '../../shared/calendar.ts'
 
 // Plans from conversation to calendar (Flow C).
 //
@@ -12,7 +12,7 @@ import type { GlassesState, Plan, PlanStatus, TranscriptLine } from '../../share
 // to the patient as a question; their spoken yes adds it to the calendar, silence sends it to the
 // family in the care portal.
 
-export type Care = { patient: string; people: { name: string; relation: string }[] }
+export type Care = { patient: string; people: { name: string; relation: string; blurb?: string }[] }
 
 export type CalendarOptions = {
   apiKey: string
@@ -50,7 +50,7 @@ export function createCalendar(o: CalendarOptions) {
   }
   let db: Stored = memory ? { plans: [], present: [] } : readJson(plansFile, { plans: [], present: [] })
   let lines: TranscriptLine[] = memory ? [] : (() => { try { return JSON.parse(fs.readFileSync(linesFile, 'utf8')) } catch { return [] } })()
-  let lastHeard: { text: string; note: string; at: number } | null = null
+  let lastHeard: { text: string; note: string; speaker: string; at: number } | null = null
 
   function save() {
     if (!memory) {
@@ -97,20 +97,30 @@ export function createCalendar(o: CalendarOptions) {
     return db.plans.find(p => p.status === 'confirmed' && !p.allDay && Math.abs(new Date(p.start).getTime() - start.getTime()) < CONFLICT_WINDOW_MS)?.id
   }
 
-  function isDuplicate(start: Date, allDay: boolean): boolean {
+  function isDuplicate(start: Date, allDay: boolean, activity: string): boolean {
     return db.plans.some(p => {
       if (!active(p) && p.status !== 'declined') return false
+      if (!sameActivity(p.activity, activity)) return false
       const t = new Date(p.start)
       return allDay || p.allDay ? startOfDay(t).getTime() === startOfDay(start).getTime() : Math.abs(t.getTime() - start.getTime()) < DUPLICATE_WINDOW_MS
     })
   }
 
-  // One thing was said. It may answer the question on screen, or contain a new plan (a statement like
-  // "I'll come Saturday at 2", or a question like "Do you want to meet at 6?": either way the patient
-  // is asked to confirm it before it is added).
+  // One thing was said. It may answer the question on screen, or start a new plan with
+  // an explicit "set an event" command plus a date or time. The patient confirms before it is added.
+  // Who, before any words: the glasses show the name as soon as the voiceprint matches
+  function noteSpeaker(speaker: string, now = new Date()) {
+    lastHeard = { text: lastHeard?.text ?? '', note: lastHeard?.note ?? '', speaker, at: now.getTime() }
+    notify()
+  }
+
+  // The glasses show what was said as soon as it's transcribed; the plan check (a model call) fills in
+  // the note, or replaces it with a question, when it answers
   async function hear(text: string, speaker = 'unknown', now = new Date()): Promise<Outcome> {
+    lastHeard = { text: text.trim(), note: '', speaker, at: now.getTime() }
+    notify()
     const out = await handle(text, speaker, now)
-    lastHeard = { text: out.line.text, note: 'error' in out && out.error ? "Couldn't check that one" : NOTES[out.kind] ?? '', at: now.getTime() }
+    lastHeard = { ...lastHeard, note: 'error' in out && out.error ? "Couldn't check that one" : NOTES[out.kind] ?? '' }
     notify()
     return out
   }
@@ -139,7 +149,7 @@ export function createCalendar(o: CalendarOptions) {
       return { kind: 'ignored', line, error: String(err) }
     }
     if (!found) return { kind: 'ignored', line }
-    if (isDuplicate(found.when.start, found.when.allDay)) return { kind: 'duplicate', line }
+    if (isDuplicate(found.when.start, found.when.allDay, found.activity)) return { kind: 'duplicate', line }
 
     const plan: Plan = {
       id: crypto.randomUUID(),
@@ -222,6 +232,19 @@ export function createCalendar(o: CalendarOptions) {
   }
 
   // What the glasses (and the patient page) need to draw right now
+  // speaker is what voice recognition called them: a family member's name, the patient's name, "Guest 2", or "unknown"
+  function speakerOf(speaker: string): HeardSpeaker | null {
+    const name = speaker.trim()
+    if (!name || name.toLowerCase() === 'unknown' || /^guest\s+\d+$/i.test(name)) return null
+    const c = o.care()
+    const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+    const firstSentence = (s: string) => s.split(/(?<=[.!?])\s/)[0]?.replace(/\.$/, '') || ''
+    if (c.patient && (same(name, c.patient) || same(name, c.patient.split(' ')[0]))) return { name: c.patient, relation: '', patient: true }
+    const person = c.people.find(p => same(p.name, name))
+    const blurb = person?.blurb ? firstSentence(person.blurb) : undefined
+    return { name: person?.name ?? name, relation: person?.relation ?? '', patient: false, ...(blurb ? { blurb } : {}) }
+  }
+
   function glassesState(now = new Date()): GlassesState {
     sweep(now)
     const asked = asking()[0]
@@ -242,14 +265,24 @@ export function createCalendar(o: CalendarOptions) {
       resolved: recent
         ? { id: recent.id, status: recent.status, text: recent.status === 'confirmed' ? `Added\n${planTitle(recent)}\n${whenLabel(recent, now)}` : 'OK, not added.' }
         : null,
-      heard: lastHeard && !asked && !recent && now.getTime() - lastHeard.at < HEARD_SHOW_MS ? { text: lastHeard.text, note: lastHeard.note } : null,
+      heard: lastHeard && !asked && !recent && now.getTime() - lastHeard.at < HEARD_SHOW_MS
+        ? { text: lastHeard.text, note: lastHeard.note, speaker: speakerOf(lastHeard.speaker) }
+        : null,
       today: confirmed.filter(sameDay),
       upcoming: confirmed.filter(p => !p.allDay && new Date(p.start).getTime() > now.getTime() && new Date(p.start).getTime() - now.getTime() <= 60 * 60_000),
     }
   }
 
+  // A voice the family named later: its past lines and plans get the real name
+  function renameSpeaker(from: string, to: string) {
+    for (const l of lines) if (l.speaker === from) l.speaker = to
+    for (const p of db.plans) p.who = [...new Set(p.who.map(w => (w === from ? to : w)))]
+    saveLines()
+    save()
+  }
+
   return {
-    hear, sweep, glassesState, setPresent, patientAnswer, addManual, familyAction, editPlan, deletePlan,
+    hear, noteSpeaker, sweep, glassesState, setPresent, patientAnswer, addManual, familyAction, editPlan, deletePlan, renameSpeaker,
     plans: () => { sweep(); return db.plans },
     present: () => db.present,
     lines: () => lines.slice(-100),

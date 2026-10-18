@@ -11,6 +11,7 @@
     "qr": "evenhub qr --clear && evenhub qr --http --ip $(ipconfig getifaddr en0) --port 5175",
     "pack": "npm run build && evenhub pack app.json dist",
     "portal": "vite portal",
+    "voice-model": "mkdir -p portal/models && curl -fL -o portal/models/nemo_en_titanet_large.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_large.onnx",
     "test": "node --test \"portal/server/**/*.test.ts\" \"portal/src/**/*.test.ts\" \"shared/**/*.test.ts\" \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p portal && tsc --noEmit -p portal/server"
   },
@@ -24,10 +25,12 @@
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.16",
+    "@evenrealities/pretext": "^0.1.4",
     "@photon-ai/api": "^0.5.0",
     "@sentry/browser": "^11.8.0",
     "@sentry/node": "^11.8.0",
     "browser-use-sdk": "^3.12.1",
-    "chrono-node": "^2.10.3"
+    "chrono-node": "^2.10.3",
+    "sherpa-onnx-node": "^1.13.8"
   }
 }
