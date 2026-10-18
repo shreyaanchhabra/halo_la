@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/browser'
 import { careOperation } from './operations'
-import type { DoseLog, HaloData, ImessageStatus, Medicine, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
+import type { DoseLog, GlassesState, HaloData, ImessageStatus, Medicine, Plan, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? 'GET'
@@ -47,8 +47,22 @@ export const transcribe = async (file: string) =>
 
 export const loadTranscripts = () => call<TranscriptLine[]>('/api/transcripts')
 
-export const addTranscript = (text: string) =>
-  call('/api/transcripts', { method: 'POST', body: JSON.stringify({ text }) })
+export const addTranscript = (text: string, speaker = 'unknown') =>
+  call<{ kind: string; summary?: string }>('/api/transcripts', { method: 'POST', body: JSON.stringify({ text, speaker }) })
+
+// ---- Plans from conversation ----
+const json = (method: string, body?: unknown): RequestInit =>
+  ({ method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+
+export const loadPlans = () => call<Plan[]>('/api/plans')
+export const loadAsk = () => call<GlassesState>('/api/glasses/state')
+export const addPlan = (plan: { activity: string; who: string[]; start: string; allDay: boolean }) => call<Plan>('/api/plans', json('POST', plan))
+export const editPlan = (id: string, patch: Partial<Pick<Plan, 'activity' | 'who' | 'start' | 'allDay'>>) => call<Plan>(`/api/plans/${id}`, json('PATCH', patch))
+export const deletePlan = (id: string) => call(`/api/plans/${id}`, json('DELETE'))
+// Family: approve or reject a plan the patient didn't answer. Patient: answer the question with a button.
+export const planAction = (id: string, action: 'approve' | 'reject' | 'yes' | 'no') => call<Plan>(`/api/plans/${id}/${action}`, json('POST'))
+export const loadPresent = () => call<string[]>('/api/present')
+export const setPresent = (here: string[]) => call<string[]>('/api/present', json('PUT', { here }))
 
 export const loadDoses = () => call<DoseLog[]>('/api/doses')
 

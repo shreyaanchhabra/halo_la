@@ -75,7 +75,10 @@ export type PriceCheck = {
   error?: string
 }
 
-export type TranscriptLine = { text: string; at: string }
+export type TranscriptLine = { text: string; at: string; id?: string; speaker?: string }
+
+// Plans HALO picks up from conversation (see shared/calendar.ts)
+export type { GlassesState, Plan, PlanStatus } from '../../shared/calendar.ts'
 
 export type TextAlertKind = 'missed' | 'refill' | 'prices'
 
@@ -97,7 +100,7 @@ export type GlassesView = {
   patientName: string
   message: { id: string; text: string } | null
   due: { medKey: string; slot: string; title: string; time: string; detail: string } | null
-  next: { title: string; time: string; kind: 'medicine' | 'appointment' } | null
+  next: { title: string; time: string; kind: 'medicine' | 'appointment' | 'plan' } | null
   appointment: { title: string; date: string; time: string | null } | null
 }
 

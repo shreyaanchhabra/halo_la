@@ -25,7 +25,7 @@ export function traceCareRequest<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   // The glasses check in every few seconds; tracing each one would bury the real care actions
-  if (!enabled || (req.method === 'GET' && pathname === '/api/glasses')) return fn()
+  if (!enabled || (req.method === 'GET' && (pathname === '/api/glasses' || pathname === '/api/glasses/state'))) return fn()
   return Sentry.continueTrace(
     { sentryTrace: header(req.headers['sentry-trace']), baggage: header(req.headers.baggage) },
     () => Sentry.startSpan(

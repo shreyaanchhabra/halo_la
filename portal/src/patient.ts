@@ -2,9 +2,9 @@ import './patient.css'
 import { initSentry } from './sentry'
 
 initSentry('patient')
-import { addTranscript, esc, fileUrl, loadData, loadDoses, loadTranscripts, onDataChanged, setDose } from './api'
+import { addTranscript, esc, fileUrl, loadAsk, loadData, loadDoses, loadPlans, loadTranscripts, onDataChanged, planAction, setDose } from './api'
 import { appointments, formatTime, scheduleFor, ymd, type ScheduleItem } from './schedule'
-import type { DoseLog, HaloData, TranscriptLine } from './types'
+import type { DoseLog, GlassesState, HaloData, Plan, TranscriptLine } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
 
@@ -22,6 +22,8 @@ function doseControl(i: ScheduleItem) {
     ? `<span class="taken">✓ Taken ${clockTime(at)} <button class="undo" data-undo="${esc(i.medKey!)}|${esc(i.slot!)}">Undo</button></span>`
     : `<button class="took" data-took="${esc(i.medKey!)}|${esc(i.slot!)}">I took it</button>`
 }
+let plans: Plan[] = []
+let ask: GlassesState['prompt'] = null
 
 const nowHHMM = () => {
   const d = new Date()
@@ -39,7 +41,7 @@ function renderClock() {
 }
 
 function renderSchedule() {
-  const items = scheduleFor(data, new Date())
+  const items = scheduleFor(data, new Date(), plans)
   const now = nowHHMM()
   // Doses that are due and not yet taken come first, then whatever is next
   const open = items.filter(i => !takenAt(i))
@@ -62,7 +64,7 @@ function renderSchedule() {
     : '<li class="empty">Nothing planned today.</li>'
 
   const today = ymd(new Date())
-  const soon = appointments(data).filter(a => a.date > today).slice(0, 5)
+  const soon = appointments(data, plans).filter(a => a.date > today).slice(0, 5)
   $('upcoming').innerHTML = soon.length
     ? soon.map(a => {
       const day = new Date(`${a.date}T00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
@@ -71,9 +73,29 @@ function renderSchedule() {
     : '<li class="empty">No appointments coming up.</li>'
 }
 
+// A plan HALO heard, waiting for the patient to say yes or no (or press a button)
+function renderAsk() {
+  const box = $('ask')
+  box.hidden = !ask
+  if (!ask) { box.innerHTML = ''; return }
+  const [question, title, when, , hint] = ask.lines
+  box.innerHTML = `
+    <p class="label">${esc(question)}</p>
+    <p class="ask-title">${esc(title)}</p>
+    <p class="ask-when">${esc(when)}</p>
+    <p class="ask-hint">${esc(hint)}</p>
+    <div class="ask-buttons">
+      <button type="button" data-answer="yes">Yes</button>
+      <button type="button" data-answer="no" class="secondary">No</button>
+    </div>`
+  box.querySelectorAll<HTMLButtonElement>('[data-answer]').forEach(b =>
+    b.addEventListener('click', async () => { b.disabled = true; await planAction(ask!.id, b.dataset.answer as 'yes' | 'no').catch(() => {}) }))
+}
+
 function render() {
   renderClock()
   renderSchedule()
+  renderAsk()
 
   $('people').innerHTML = data.people.length
     ? data.people.map(p => `
@@ -108,7 +130,7 @@ function renderHeard() {
 }
 
 async function load() {
-  ;[data, doses] = await Promise.all([loadData(), loadDoses()])
+  ;[data, doses, plans, ask] = await Promise.all([loadData(), loadDoses(), loadPlans(), loadAsk().then(s => s.prompt)])
   render()
 }
 

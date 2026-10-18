@@ -1,132 +1,345 @@
 import {
-  waitForEvenAppBridge, CreateStartUpPageContainer, OsEventTypeList, TextContainerProperty, TextContainerUpgrade,
+  waitForEvenAppBridge,
+  TextContainerProperty,
+  TextContainerUpgrade,
+  CreateStartUpPageContainer,
+  AudioInputSource,
+  OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
-import type { GlassesView } from '../portal/src/types'
+import type { GlassesState, Plan } from '../shared/calendar.ts'
+import { API, getCare, getState, markSeen, markTaken, postAudio, postStats } from './api.ts'
+import { AudioPipeline } from './audio/pipeline.ts'
+import type { SegmenterOptions } from './audio/segmenter.ts'
+import { buildScreen, type CareCard, type Mic } from './screens.ts'
 
-// The dev server forwards /api to the HALO care portal
-const POLL_MS = 5_000
-const THANKS_MS = 4_000
-const BRIDGE_TIMEOUT_MS = 5_000
+// ?debug shows mic levels on the display and exposes test hooks on window.
+// ?minRms=80&startRatio=2.5 (and the other segmenter options) tune the cutter without a rebuild.
+const params = new URLSearchParams(location.search)
+const DEBUG = params.has('debug')
+// ?mic=injected: never open the real microphone; audio only comes from window.__haloFeed (needs ?debug). For tests.
+const MIC_INJECTED = DEBUG && params.get('mic') === 'injected'
+const SEGMENTER_KEYS: (keyof SegmenterOptions)[] = ['minRms', 'startRatio', 'sustainRatio', 'endSilenceMs', 'minSpeechMs', 'calibrationMs']
+const segmenterOverrides: Partial<SegmenterOptions> = {}
+for (const k of SEGMENTER_KEYS) {
+  const v = Number(params.get(k))
+  if (params.has(k) && Number.isFinite(v)) segmenterOverrides[k] = v
+}
+
+const POLL_MS = 1000
+const STATS_MS = 5000
+const MIC_RETRY_MS = 10_000
+const MIC_STALL_MS = 4000 // the mic sends an audio event every 100 ms, even in silence, so a gap this long means it died
+const MIC_RESTART_COOLDOWN_MS = 10_000
+const REMINDER_SHOW_MS = 20_000
+const BRIDGE_TIMEOUT_MS = 5000
+const OFFLINE_AFTER_FAILURES = 2
 
 const bridge = await waitForEvenAppBridge()
-const screen = { containerID: 1, containerName: 'halo' }
 
-let view: GlassesView | null = null
-let unreachable = false
-let thanks: { text: string; until: number } | null = null
+// ---- state --------------------------------------------------------------------------------
+
+let state: GlassesState | null = null
+let online = true
+let failures = 0
+let mic: Mic = 'off'
+let userPaused = false
+let skewMs = 0 // server clock minus this device's clock, so reminders fire on the family's calendar time
+let reminder: Plan | null = null
+let reminderTimer: ReturnType<typeof setTimeout> | undefined
+let micRetry: ReturnType<typeof setTimeout> | undefined
+let lastDebug = ''
+let lastAudioAt = Date.now()
+let lastMicRestart = 0
+let notice: string | null = null
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
+let care: CareCard | null = null
+// A card just tapped stays hidden until the server catches up
+const tapped = new Set<string>()
+
+const nowDate = () => new Date(Date.now() + skewMs)
+
+// ---- display --------------------------------------------------------------------------------
+
+const withTimeout = <T>(p: Promise<T>, ms = BRIDGE_TIMEOUT_MS) =>
+  Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('bridge timeout')), ms))])
+
+const CONTAINER = { id: 1, name: 'main' }
 let shown = ''
+let wanted = ''
+let drawing = false
 
-function formatTime(hhmm: string) {
-  const [h, m] = hhmm.split(':').map(Number)
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+function screen(): string {
+  return buildScreen({ now: nowDate(), state, online, mic: userPaused ? 'paused' : mic, reminder, notice, care, debug: DEBUG ? lastDebug : undefined })
 }
 
-const nowLabel = () => new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-
-function homeText(v: GlassesView | null) {
-  const lines = [`HALO   ${nowLabel()}`, '']
-  if (unreachable || !v) {
-    lines.push("Can't reach HALO right now.", 'Trying again...')
-    return lines.join('\n')
-  }
-  if (v.next) {
-    lines.push(`Next  ${formatTime(v.next.time)}`, `${v.next.kind === 'medicine' ? 'Take ' : ''}${v.next.title}`)
-  } else {
-    lines.push('Nothing else planned today.')
-  }
-  if (v.appointment) {
-    const day = new Date(`${v.appointment.date}T00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-    lines.push('', 'Appointment', `${day}${v.appointment.time ? `, ${formatTime(v.appointment.time)}` : ''}`, v.appointment.title)
-  }
-  return lines.join('\n')
-}
-
-// A family message comes first, then a dose that's due, then the home screen
-function screenText(): string {
-  if (thanks && Date.now() < thanks.until) return thanks.text
-  thanks = null
-  if (!unreachable && view?.message) {
-    return ['● Message from family', '', view.message.text, '', '', '▶ Tap when you have read it'].join('\n')
-  }
-  if (!unreachable && view?.due) {
-    const d = view.due
-    return ['● Time for your medicine', '', d.title, d.detail, `Due at ${formatTime(d.time)}`, '', '▶ Tap when you have taken it'].join('\n')
-  }
-  return homeText(view)
-}
-
-const withTimeout = <T>(p: Promise<T>) =>
-  Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Glasses timed out')), BRIDGE_TIMEOUT_MS))])
-
-// Bridge calls share one Bluetooth link, so they run one at a time
-let queue: Promise<unknown> = Promise.resolve()
-function render() {
-  queue = queue.then(async () => {
-    const content = screenText()
-    if (content === shown) return
-    const ok = await withTimeout(bridge.textContainerUpgrade(new TextContainerUpgrade({
-      ...screen, contentOffset: 0, contentLength: 0, content,
-    }))).catch(() => false)
-    if (ok) shown = content
-  })
-}
-
-async function refresh() {
+// Bridge calls are serialized, and only the newest screen is ever drawn
+async function draw() {
+  if (drawing) return
+  drawing = true
   try {
-    const res = await fetch('/api/glasses')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    view = await res.json()
-    unreachable = false
-  } catch {
-    unreachable = true
+    while (wanted !== shown) {
+      const text = wanted
+      try {
+        await withTimeout(bridge.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: CONTAINER.id, containerName: CONTAINER.name, contentOffset: 0, contentLength: 0, content: text,
+        })))
+        shown = text
+      } catch (err) {
+        console.warn('[halo] draw failed, retrying', err)
+        await new Promise(r => setTimeout(r, 500))
+      }
+    }
+  } finally {
+    drawing = false
   }
-  render()
 }
 
-async function post(path: string, body: unknown) {
-  await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+function flash(message: string, ms = 8000) {
+  notice = message
+  clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => { notice = null; refresh() }, ms)
+  refresh()
 }
 
-async function onTap() {
-  if (thanks || unreachable || !view) return
-  if (view.message) {
-    const { id } = view.message
-    view = { ...view, message: null }
-    thanks = { text: '\n\n   ○ Got it', until: Date.now() + THANKS_MS / 2 }
-    render()
-    await post('/api/glasses/seen', { id }).catch(() => {})
-  } else if (view.due) {
-    const { medKey, slot, title } = view.due
-    view = { ...view, due: null }
-    thanks = { text: `\n\n   ○ ${title} taken.\n   Thank you.`, until: Date.now() + THANKS_MS }
-    render()
-    await post('/api/doses', { medKey, slot, taken: true, by: 'glasses' }).catch(() => {})
-  } else {
-    return
-  }
-  setTimeout(refresh, THANKS_MS + 100)
+function refresh() {
+  wanted = screen()
+  void draw()
 }
 
+wanted = screen()
 const created = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
   containerTotalNum: 1,
   textObject: [new TextContainerProperty({
-    ...screen,
     xPosition: 0, yPosition: 0, width: 576, height: 288,
-    borderWidth: 0, borderColor: 5, paddingLength: 16,
-    content: 'HALO',
-    isEventCapture: 1,
+    borderWidth: 0, borderColor: 5, paddingLength: 4,
+    containerID: CONTAINER.id, containerName: CONTAINER.name,
+    content: wanted, isEventCapture: 1,
   })],
 }))
-if (created !== 0) console.error(`HALO: glasses page failed to start (code ${created})`)
-shown = 'HALO'
+console.log('[halo] page created:', created === 0 ? 'success' : `failed (${created})`)
+shown = wanted
 
-// Keeps polling in the background too: family messages and due doses shouldn't wait for the phone app to open
-const timer = setInterval(refresh, POLL_MS)
-bridge.onEvenHubEvent(event => {
-  const type = event.sysEvent?.eventType ?? (event.sysEvent ? OsEventTypeList.CLICK_EVENT : undefined)
-  if (type === OsEventTypeList.CLICK_EVENT) void onTap()
-  else if (type === OsEventTypeList.DOUBLE_CLICK_EVENT) void bridge.shutDownPageContainer(1)
-  else if (type === OsEventTypeList.FOREGROUND_ENTER_EVENT) void refresh()
-  else if (type === OsEventTypeList.ABNORMAL_EXIT_EVENT || type === OsEventTypeList.SYSTEM_EXIT_EVENT) clearInterval(timer)
+// ---- microphone -> utterances -> server ---------------------------------------------------------
+
+const pipeline = new AudioPipeline({
+  segmenter: segmenterOverrides,
+  send: async wav => {
+    const reply = await postAudio(wav)
+    console.log(`[halo] heard "${reply.text}" -> ${reply.kind}${reply.error ? ' (' + reply.error + ')' : ''}`)
+    void poll() // show the question or the answer straight away
+  },
+  onError: err => { console.warn('[halo] upload failed', err); flash("Couldn't hear that. Please say it again.") },
 })
-void refresh()
+
+function toBytes(x: unknown): Uint8Array | null {
+  if (x instanceof Uint8Array) return x
+  if (Array.isArray(x)) return Uint8Array.from(x)
+  if (typeof x === 'string') return Uint8Array.from(atob(x), c => c.charCodeAt(0))
+  return null
+}
+
+function onAudio(raw: unknown) {
+  lastAudioAt = Date.now()
+  if (mic !== 'on' || userPaused) return
+  const pcm = toBytes(raw)
+  if (pcm?.length) pipeline.push(pcm)
+}
+
+async function startMic() {
+  clearTimeout(micRetry)
+  if (userPaused) return
+  if (MIC_INJECTED) { mic = 'on'; refresh(); return }
+  try {
+    mic = (await withTimeout(bridge.audioControl(true, AudioInputSource.Glasses))) ? 'on' : 'off'
+  } catch (err) {
+    console.warn('[halo] microphone failed to start', err)
+    mic = 'off'
+  }
+  if (mic === 'off') micRetry = setTimeout(() => void startMic(), MIC_RETRY_MS)
+  refresh()
+}
+
+// The microphone link can drop (a Bluetooth hiccup, the phone sleeping). Notice, and reopen it.
+async function restartMic() {
+  lastMicRestart = Date.now()
+  console.warn('[halo] microphone stalled, restarting it')
+  flash('Mic stopped. Restarting it...', 5000)
+  pipeline.flush()
+  try { await withTimeout(bridge.audioControl(false)) } catch { /* it may already be gone */ }
+  await new Promise(r => setTimeout(r, 500))
+  lastAudioAt = Date.now()
+  mic = 'off'
+  await startMic()
+}
+
+const watchdog = setInterval(() => {
+  const stalled = Date.now() - lastAudioAt > MIC_STALL_MS
+  if (!MIC_INJECTED && mic === 'on' && !userPaused && stalled && Date.now() - lastMicRestart > MIC_RESTART_COOLDOWN_MS) void restartMic()
+}, 1000)
+
+async function stopMic() {
+  clearTimeout(micRetry)
+  pipeline.flush()
+  if (MIC_INJECTED) { mic = 'off'; return }
+  try { await withTimeout(bridge.audioControl(false)) } catch (err) { console.warn('[halo] microphone failed to stop', err) }
+  mic = 'off'
+}
+
+// ---- server polling and reminders -----------------------------------------------------------------
+
+const REMINDED_KEY = 'halo.reminded'
+const reminded = new Set<string>()
+try {
+  const saved = await withTimeout(bridge.getLocalStorage(REMINDED_KEY))
+  if (saved) for (const id of JSON.parse(saved) as string[]) reminded.add(id)
+} catch { /* first run, or storage unavailable: worst case a reminder repeats */ }
+
+function rememberReminded() {
+  void withTimeout(bridge.setLocalStorage(REMINDED_KEY, JSON.stringify([...reminded].slice(-50)))).catch(() => {})
+}
+
+function checkReminders() {
+  if (!state) return
+  for (const p of state.upcoming) {
+    if (reminded.has(p.id)) continue
+    reminded.add(p.id)
+    rememberReminded()
+    // Just confirmed by the patient a moment ago: they know, no need to repeat it
+    if (p.resolvedAt && nowDate().getTime() - new Date(p.resolvedAt).getTime() < 60_000) continue
+    reminder = p
+    clearTimeout(reminderTimer)
+    reminderTimer = setTimeout(() => { reminder = null; refresh() }, REMINDER_SHOW_MS)
+  }
+}
+
+const cardKey = (c: CareCard) => (c.kind === 'message' ? `m:${c.id}` : `d:${c.medKey}|${c.slot}`)
+
+// A family message comes before a dose that's due
+function careCard(view: Awaited<ReturnType<typeof getCare>>): CareCard | null {
+  const cards: CareCard[] = [
+    ...(view.message ? [{ kind: 'message' as const, ...view.message }] : []),
+    ...(view.due ? [{ kind: 'dose' as const, ...view.due }] : []),
+  ]
+  return cards.find(c => !tapped.has(cardKey(c))) ?? null
+}
+
+async function tapCare(card: CareCard) {
+  tapped.add(cardKey(card))
+  care = null
+  flash(card.kind === 'message' ? 'Got it.' : `${card.title} taken. Thank you.`, 4000)
+  try {
+    if (card.kind === 'message') await markSeen(card.id)
+    else await markTaken(card.medKey, card.slot)
+  } catch (err) {
+    console.warn('[halo] tap failed to save', err)
+    tapped.delete(cardKey(card))
+    flash("Couldn't save that. Please tap again.")
+  }
+  void poll()
+}
+
+let polling = false
+async function poll() {
+  if (polling) return
+  polling = true
+  try {
+    const [next, view] = await Promise.all([getState(), getCare().catch(() => undefined)])
+    state = next
+    skewMs = new Date(state.now).getTime() - Date.now()
+    failures = 0
+    online = true
+    checkReminders()
+    if (view) care = careCard(view)
+  } catch (err) {
+    if (++failures >= OFFLINE_AFTER_FAILURES) online = false
+    if (failures === OFFLINE_AFTER_FAILURES) console.warn('[halo] server unreachable', err)
+  } finally {
+    polling = false
+  }
+  if (DEBUG) {
+    const s = pipeline.stats()
+    lastDebug = `rms ${s.lastRms} floor ${s.noiseFloor} thr ${s.startThreshold} n ${s.utterances}`
+  }
+  refresh()
+}
+
+const pollTimer = setInterval(() => void poll(), POLL_MS)
+const statsTimer = setInterval(() => {
+  if (mic !== 'on') return
+  const s = pipeline.stats()
+  void postStats({ ...s, at: new Date().toISOString(), source: 'glasses', segmenter: segmenterOverrides }).catch(() => {})
+  if (DEBUG) console.log('[halo] mic', JSON.stringify(s))
+}, STATS_MS)
+
+// ---- buttons and lifecycle --------------------------------------------------------------------------
+
+async function togglePause() {
+  userPaused = !userPaused
+  if (userPaused) await stopMic()
+  else await startMic()
+  refresh()
+}
+
+async function cleanup() {
+  clearInterval(pollTimer)
+  clearInterval(statsTimer)
+  clearInterval(watchdog)
+  clearTimeout(reminderTimer)
+  await stopMic()
+  unsubscribe()
+}
+
+const unsubscribe = bridge.onEvenHubEvent(event => {
+  if (event.audioEvent) onAudio(event.audioEvent.audioPcm)
+
+  if (!event.sysEvent) return
+  switch (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) {
+    case OsEventTypeList.CLICK_EVENT:
+      // While paused, a press opens the system exit dialog. A family message or due dose on screen
+      // is acknowledged with a tap. Otherwise a stray tap does nothing: answers are spoken, not tapped.
+      if (userPaused) void bridge.shutDownPageContainer(1)
+      else if (care && !state?.prompt && !state?.resolved && !reminder) void tapCare(care)
+      break
+    case OsEventTypeList.DOUBLE_CLICK_EVENT:
+      void togglePause()
+      break
+    case OsEventTypeList.FOREGROUND_ENTER_EVENT:
+      void startMic()
+      void poll()
+      break
+    case OsEventTypeList.FOREGROUND_EXIT_EVENT:
+      void stopMic().then(refresh)
+      break
+    case OsEventTypeList.ABNORMAL_EXIT_EVENT:
+    case OsEventTypeList.SYSTEM_EXIT_EVENT:
+      void cleanup()
+      break
+  }
+})
+
+window.addEventListener('beforeunload', () => { void bridge.audioControl(false) })
+
+if (MIC_INJECTED) {
+  // Pull test audio queued on the server (HALO_DEBUG_INJECT=1) and feed it through the real pipeline
+  const CHUNK = 3200 // 100 ms, like the glasses send
+  setInterval(() => {
+    void fetch(`${API}/api/debug/inject`).then(r => r.json()).then((j: { clips: string[] }) => {
+      for (const b64 of j.clips) {
+        const pcm = toBytes(b64)!
+        for (let i = 0; i < pcm.length; i += CHUNK) pipeline.push(pcm.subarray(i, i + CHUNK))
+      }
+    }).catch(() => {})
+  }, 200)
+}
+
+if (DEBUG) {
+  // Test hooks: push raw 16 kHz PCM through the real pipeline without a microphone
+  Object.assign(window, {
+    __haloFeed: (pcm: Uint8Array) => pipeline.push(pcm),
+    __haloDrained: () => pipeline.drained(),
+    __haloStats: () => pipeline.stats(),
+  })
+}
+
+await startMic()
+await poll()
