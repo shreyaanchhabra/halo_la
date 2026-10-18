@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "sim": "evenhub-simulator http://localhost:5173",
+    "sim": "evenhub-simulator http://localhost:5175",
     "qr": "evenhub qr --clear && evenhub qr --http --ip $(ipconfig getifaddr en0) --port 5173",
     "pack": "npm run build && evenhub pack app.json dist",
     "portal": "vite portal",
