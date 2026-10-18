@@ -14,7 +14,7 @@
     {
       "name": "network",
       "desc": "Sends short speech clips to the HALO portal server and reads the calendar from it.",
-      "whitelist": ["http://localhost:5174"]
+      "whitelist": ["http://localhost:5176"]
     }
   ],
   "supported_languages": ["en"]

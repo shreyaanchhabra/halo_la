@@ -235,6 +235,7 @@ export default defineConfig(({ mode }) => {
         agentNumber: env.PHOTON_AGENT_NUMBER ?? '',
       },
     })],
-    server: { port: 5174, watch: { ignored: ['**/data/**'] }, fs: { allow: ['..'] } }, // shared/ is imported from the repo root
+    cacheDir: 'node_modules/.vite/portal', // the glasses app's dev server also uses node_modules/.vite; keep the two caches apart
+    server: { port: 5176, watch: { ignored: ['**/data/**'] }, fs: { allow: ['..'] } }, // shared/ is imported from the repo root
   }
 })
