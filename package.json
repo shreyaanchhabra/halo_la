@@ -21,6 +21,7 @@
     "vite": "^8.3.0"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.16"
+    "@evenrealities/even_hub_sdk": "^0.0.16",
+    "browser-use-sdk": "^3.12.1"
   }
 }

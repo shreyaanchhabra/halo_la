@@ -43,10 +43,34 @@ export type Prescription = {
   readError?: string
 }
 
+// Pills on hand as counted by the family, at a point in time
+export type Stock = { count: number; at: string }
+
+export type Refill = { status: 'approved' | 'dismissed'; at: string; pharmacy?: string; price?: number }
+
 export type HaloData = {
-  patient: { name: string }
+  patient: { name: string; zip?: string }
   people: Person[]
   prescriptions: Prescription[]
+  // Keyed by medicine key ("<prescription id>:<index>")
+  stock?: Record<string, Stock>
+  refills?: Record<string, Refill>
+}
+
+export type DoseLog = { medKey: string; slot: string; at: string } // slot: "YYYY-MM-DD HH:MM"
+
+export type PriceQuote = { pharmacy: string; price: number; priceType: string }
+
+export type PriceCheck = {
+  status: 'checking' | 'done' | 'failed'
+  zip: string
+  startedAt?: string
+  checkedAt?: string
+  url?: string
+  quantity?: number | null
+  quotes?: PriceQuote[]
+  note?: string
+  error?: string
 }
 
 export type TranscriptLine = { text: string; at: string }

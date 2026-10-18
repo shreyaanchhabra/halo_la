@@ -1,4 +1,4 @@
-import type { HaloData, PrescriptionReading, TranscriptLine } from './types'
+import type { DoseLog, HaloData, Medicine, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -33,6 +33,17 @@ export const loadTranscripts = () => call<TranscriptLine[]>('/api/transcripts')
 
 export const addTranscript = (text: string) =>
   call('/api/transcripts', { method: 'POST', body: JSON.stringify({ text }) })
+
+export const loadDoses = () => call<DoseLog[]>('/api/doses')
+
+export const setDose = (medKey: string, slot: string, taken: boolean) =>
+  call('/api/doses', { method: 'POST', body: JSON.stringify({ medKey, slot, taken }) })
+
+export const loadPrices = () => call<Record<string, PriceCheck>>('/api/prices')
+
+// Starts a Browser Use lookup on GoodRx; the result arrives later through onDataChanged
+export const checkPrices = (key: string, med: Medicine, zip: string) =>
+  call('/api/prices', { method: 'POST', body: JSON.stringify({ key, med, zip }) })
 
 // Calls back whenever the other page (or this one) saves data
 export function onDataChanged(cb: () => void) {

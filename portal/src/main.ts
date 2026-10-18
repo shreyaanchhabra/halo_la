@@ -1,21 +1,119 @@
 import './style.css'
 import {
-  esc, fileUrl, loadData, onDataChanged, readPrescription, removeFile, saveData, transcribe, uploadFile,
+  checkPrices, esc, fileUrl, loadData, loadDoses, loadPrices, onDataChanged, readPrescription, removeFile, saveData,
+  transcribe, uploadFile,
 } from './api'
-import { downloadIcs, formatTime } from './schedule'
-import type { HaloData, Prescription } from './types'
+import { allMedicines, daysLeft, pillsLeft, refillDue, type MedEntry } from './meds'
+import { downloadIcs, formatTime, ymd } from './schedule'
+import type { DoseLog, HaloData, PriceCheck, Prescription } from './types'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 let data: HaloData = { patient: { name: '' }, people: [], prescriptions: [] }
+let doses: DoseLog[] = []
+let prices: Record<string, PriceCheck> = {}
 // Prescriptions and people with a request to Groq in progress
 const busy = new Set<string>()
+// Medicines whose GoodRx lookup this page already started on its own, so it only does it once
+const autoChecked = new Set<string>()
 
 async function load() {
-  data = await loadData()
-  const nameInput = $<HTMLInputElement>('patient-name')
-  if (document.activeElement !== nameInput) nameInput.value = data.patient.name
+  ;[data, doses, prices] = await Promise.all([loadData(), loadDoses(), loadPrices()])
+  for (const [id, value] of [['patient-name', data.patient.name], ['patient-zip', data.patient.zip ?? '']]) {
+    const input = $<HTMLInputElement>(id)
+    if (document.activeElement !== input) input.value = value
+  }
   render()
+  autoCheckPrices()
+}
+
+const money = (n: number) => `$${n.toFixed(2)}`
+const shortDate = (iso: string) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+function renderPrices(e: MedEntry) {
+  const p = prices[e.key]
+  if (!p) return `<p class="status">No GoodRx prices yet.</p>`
+  if (p.status === 'checking') return `<p class="status">Checking GoodRx with Browser Use… this usually takes 1 to 3 minutes.</p>`
+  if (p.status === 'failed') return `<p class="status error">GoodRx lookup failed: ${esc(p.error ?? 'unknown error')}</p>`
+  const quotes = p.quotes ?? []
+  return `
+    <div class="reading">
+      <h4>GoodRx prices near ${esc(p.zip)}${p.quantity ? ` · qty ${p.quantity}` : ''}</h4>
+      ${quotes.length ? `<div class="table-scroll"><table>${quotes.map(q => `
+        <tr><td>${esc(q.pharmacy)}</td><td>${money(q.price)}</td><td>${esc(q.priceType)}</td></tr>`).join('')}</table></div>`
+        : '<p class="status">No prices found.</p>'}
+      ${p.note ? `<p class="status">${esc(p.note)}</p>` : ''}
+      <p class="status">Checked ${p.checkedAt ? shortDate(p.checkedAt) : ''}${p.url ? ` · <a href="${esc(p.url)}" target="_blank" rel="noopener">Open on GoodRx</a>` : ''}</p>
+    </div>`
+}
+
+function renderRefill(e: MedEntry) {
+  const refill = data.refills?.[e.key]
+  if (refill?.status === 'approved') {
+    return `<p class="refill ok">Refill approved ${shortDate(refill.at)}${refill.pharmacy ? ` at ${esc(refill.pharmacy)}` : ''}${refill.price != null ? `, ${money(refill.price)}` : ''}. Order it with the pharmacy, then update the pill count.</p>`
+  }
+  if (!refillDue(e, data, doses) || refill?.status === 'dismissed') return ''
+  const best = prices[e.key]?.quotes?.[0]
+  return `
+    <div class="refill due">
+      <p><b>Refill needed:</b> about ${daysLeft(e, data, doses)} days of pills left.${best ? ` Cheapest on GoodRx: ${money(best.price)} at ${esc(best.pharmacy)}.` : ''}</p>
+      <div class="refill-actions">
+        <button data-approve="${e.key}">Approve refill</button>
+        <button class="link" data-dismiss="${e.key}">Dismiss</button>
+      </div>
+    </div>`
+}
+
+function renderMedicines() {
+  const meds = allMedicines(data)
+  const today = ymd(new Date())
+  $('medicines').innerHTML = meds.length
+    ? meds.map(e => {
+      const left = pillsLeft(e, data, doses)
+      const days = daysLeft(e, data, doses)
+      const takenToday = doses.filter(d => d.medKey === e.key && d.slot.startsWith(today)).length
+      const checking = prices[e.key]?.status === 'checking'
+      return `
+      <li>
+        <div>
+          <strong>${esc(`${e.med.name} ${e.med.strength}`)}</strong>
+          <p>${e.med.times.map(formatTime).join(', ') || 'No dose times'} · taken today: ${takenToday} of ${e.med.times.length}</p>
+          <p>Pills left: <b>${left ?? 'unknown'}</b>${days != null ? ` (about ${days} days)` : ''}</p>
+          <form class="stock-form" data-stock="${e.key}">
+            <input type="number" min="0" step="1" placeholder="Pills on hand" aria-label="Pills on hand for ${esc(e.med.name)}" />
+            <button type="submit" class="secondary">Update count</button>
+          </form>
+          ${renderRefill(e)}
+          ${renderPrices(e)}
+        </div>
+        <div class="actions">
+          <button class="link" data-prices="${e.key}" ${checking ? 'disabled' : ''}>${prices[e.key] ? 'Check prices again' : 'Check GoodRx prices'}</button>
+        </div>
+      </li>`
+    }).join('')
+    : '<li class="empty">No medicines yet. Upload a prescription above.</li>'
+}
+
+async function startPriceCheck(key: string) {
+  const entry = allMedicines(data).find(e => e.key === key)
+  if (!entry) return
+  try {
+    await checkPrices(key, entry.med, data.patient.zip ?? '')
+  } catch (err) {
+    prices[key] = { status: 'failed', zip: data.patient.zip ?? '', error: (err as Error).message }
+    renderMedicines()
+  }
+}
+
+// When a refill comes due, look up prices once without waiting to be asked
+function autoCheckPrices() {
+  if (!data.patient.zip) return
+  for (const e of allMedicines(data)) {
+    if (refillDue(e, data, doses) && !prices[e.key] && !autoChecked.has(e.key)) {
+      autoChecked.add(e.key)
+      startPriceCheck(e.key)
+    }
+  }
 }
 
 function renderReading(rx: Prescription) {
@@ -73,6 +171,8 @@ function render() {
         </div>
       </li>`).join('')
     : '<li class="empty">No prescriptions uploaded yet.</li>'
+
+  renderMedicines()
 }
 
 async function readRx(id: string) {
@@ -109,6 +209,11 @@ async function transcribePerson(id: string) {
 // Patient
 $<HTMLInputElement>('patient-name').addEventListener('change', e => {
   data.patient.name = (e.target as HTMLInputElement).value.trim()
+  saveData(data)
+})
+
+$<HTMLInputElement>('patient-zip').addEventListener('change', e => {
+  data.patient.zip = (e.target as HTMLInputElement).value.trim()
   saveData(data)
 })
 
@@ -220,10 +325,18 @@ $<HTMLFormElement>('rx-form').addEventListener('submit', async e => {
 
 // List buttons
 document.addEventListener('click', async e => {
-  const { delPerson, delRx, readRx: readId, transcribe: transcribeId } = (e.target as HTMLElement).dataset
+  const {
+    delPerson, delRx, readRx: readId, transcribe: transcribeId, prices: pricesKey, approve, dismiss,
+  } = (e.target as HTMLElement).dataset
   if (readId) return readRx(readId)
   if (transcribeId) return transcribePerson(transcribeId)
-  if (delPerson) {
+  if (pricesKey) return startPriceCheck(pricesKey)
+  if (approve) {
+    const best = prices[approve]?.quotes?.[0]
+    data.refills = { ...data.refills, [approve]: { status: 'approved', at: new Date().toISOString(), pharmacy: best?.pharmacy, price: best?.price } }
+  } else if (dismiss) {
+    data.refills = { ...data.refills, [dismiss]: { status: 'dismissed', at: new Date().toISOString() } }
+  } else if (delPerson) {
     const p = data.people.find(x => x.id === delPerson)
     data.people = data.people.filter(x => x.id !== delPerson)
     if (p) await removeFile(p.voiceFile)
@@ -234,6 +347,21 @@ document.addEventListener('click', async e => {
   } else {
     return
   }
+  await saveData(data)
+  render()
+})
+
+// A new pill count starts the refill cycle over
+document.addEventListener('submit', async e => {
+  const form = e.target as HTMLFormElement
+  const key = form.dataset.stock
+  if (!key) return
+  e.preventDefault()
+  const count = Number(form.querySelector('input')!.value)
+  if (!Number.isInteger(count) || count < 0) return
+  data.stock = { ...data.stock, [key]: { count, at: new Date().toISOString() } }
+  if (data.refills) delete data.refills[key]
+  autoChecked.delete(key)
   await saveData(data)
   render()
 })

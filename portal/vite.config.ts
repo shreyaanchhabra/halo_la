@@ -3,12 +3,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readPrescription, transcribe } from './server/ai'
+import { checkGoodRx } from './server/goodrx'
 
 const DATA_DIR = fileURLToPath(new URL('./data', import.meta.url))
 const DATA_FILE = path.join(DATA_DIR, 'halo.json')
 const UPLOADS = path.join(DATA_DIR, 'uploads')
 const TRANSCRIPTS_FILE = path.join(DATA_DIR, 'transcripts.json')
 const MAX_TRANSCRIPT_LINES = 500
+const DOSES_FILE = path.join(DATA_DIR, 'doses.json')
+const PRICES_FILE = path.join(DATA_DIR, 'prices.json')
+
+const readJson = <T>(file: string, fallback: T): T =>
+  fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : fallback
+const writeJson = (file: string, value: unknown) => fs.writeFileSync(file, JSON.stringify(value, null, 2))
 
 const MIME: Record<string, string> = {
   '.webm': 'audio/webm', '.mp4': 'audio/mp4', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
@@ -25,7 +32,8 @@ function readBody(req: NodeJS.ReadableStream): Promise<Buffer> {
 }
 
 // Dev-only stand-in for a backend: saves everything to portal/data/
-function jsonStore(groqKey: string): Plugin {
+function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
+  const groqKey = keys.groq
   return {
     name: 'halo-json-store',
     configureServer(server) {
@@ -66,10 +74,40 @@ function jsonStore(groqKey: string): Plugin {
             res.end(fs.existsSync(TRANSCRIPTS_FILE) ? fs.readFileSync(TRANSCRIPTS_FILE) : '[]')
           } else if (url.pathname === '/api/transcripts' && req.method === 'POST') {
             const { text } = JSON.parse((await readBody(req)).toString())
-            const lines = fs.existsSync(TRANSCRIPTS_FILE) ? JSON.parse(fs.readFileSync(TRANSCRIPTS_FILE, 'utf8')) : []
+            const lines = readJson<unknown[]>(TRANSCRIPTS_FILE, [])
             lines.push({ text: String(text), at: new Date().toISOString() })
-            fs.writeFileSync(TRANSCRIPTS_FILE, JSON.stringify(lines.slice(-MAX_TRANSCRIPT_LINES), null, 2))
+            writeJson(TRANSCRIPTS_FILE, lines.slice(-MAX_TRANSCRIPT_LINES))
             notify()
+            res.end('{"ok":true}')
+          } else if (url.pathname === '/api/doses' && req.method === 'GET') {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(readJson(DOSES_FILE, [])))
+          } else if (url.pathname === '/api/doses' && req.method === 'POST') {
+            // { medKey, slot, taken }: slot is "YYYY-MM-DD HH:MM"; taken: false undoes a tap
+            const { medKey, slot, taken } = JSON.parse((await readBody(req)).toString())
+            const doses = readJson<{ medKey: string; slot: string; at: string }[]>(DOSES_FILE, [])
+              .filter(d => !(d.medKey === medKey && d.slot === slot))
+            if (taken !== false) doses.push({ medKey: String(medKey), slot: String(slot), at: new Date().toISOString() })
+            writeJson(DOSES_FILE, doses)
+            notify()
+            res.end('{"ok":true}')
+          } else if (url.pathname === '/api/prices' && req.method === 'GET') {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(readJson(PRICES_FILE, {})))
+          } else if (url.pathname === '/api/prices' && req.method === 'POST') {
+            if (!keys.browserUse) throw new Error('BROWSER_USE_API_KEY is missing. Add it to portal/.env and restart the portal.')
+            const { key, med, zip } = JSON.parse((await readBody(req)).toString())
+            if (!/^\d{5}$/.test(zip ?? '')) throw new Error("Add the patient's 5-digit ZIP code first.")
+            const setPrice = (value: unknown) => {
+              writeJson(PRICES_FILE, { ...readJson(PRICES_FILE, {}), [key]: value })
+              notify()
+            }
+            const startedAt = new Date().toISOString()
+            setPrice({ status: 'checking', startedAt, zip })
+            // Runs in the background; open pages update when it finishes
+            checkGoodRx(keys.browserUse, med, zip)
+              .then(result => setPrice({ status: 'done', checkedAt: new Date().toISOString(), zip, ...result }))
+              .catch(err => setPrice({ status: 'failed', checkedAt: new Date().toISOString(), zip, error: err instanceof Error ? err.message : String(err) }))
             res.end('{"ok":true}')
           } else if (url.pathname.startsWith('/api/files/') && req.method === 'GET') {
             const file = path.join(UPLOADS, path.basename(decodeURIComponent(url.pathname)))
@@ -92,7 +130,10 @@ function jsonStore(groqKey: string): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => ({
-  plugins: [jsonStore(loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), '').GROQ_API_KEY ?? '')],
-  server: { port: 5174, watch: { ignored: ['**/data/**'] } },
-}))
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), '')
+  return {
+    plugins: [jsonStore({ groq: env.GROQ_API_KEY ?? '', browserUse: env.BROWSER_USE_API_KEY ?? '' })],
+    server: { port: 5174, watch: { ignored: ['**/data/**'] } },
+  }
+})

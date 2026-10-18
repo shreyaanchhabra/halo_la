@@ -5,7 +5,11 @@ export type ScheduleItem = {
   title: string
   detail: string
   kind: 'medicine' | 'appointment'
+  medKey?: string
+  slot?: string // "YYYY-MM-DD HH:MM", identifies one dose
 }
+
+export const medKey = (rxId: string, index: number) => `${rxId}:${index}`
 
 export const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -30,11 +34,14 @@ export function scheduleFor(data: HaloData, day: Date): ScheduleItem[] {
 
   for (const rx of data.prescriptions) {
     if (startDate(rx) > date) continue
-    for (const m of rx.reading?.medicines ?? []) {
+    rx.reading?.medicines.forEach((m, i) => {
       for (const time of m.times) {
-        items.push({ time, title: `${m.name} ${m.strength}`.trim(), detail: m.instructions, kind: 'medicine' })
+        items.push({
+          time, title: `${m.name} ${m.strength}`.trim(), detail: m.instructions, kind: 'medicine',
+          medKey: medKey(rx.id, i), slot: `${date} ${time}`,
+        })
       }
-    }
+    })
   }
   for (const a of appointments(data)) {
     if (a.date === date) items.push({ time: a.time, title: a.title, detail: 'Appointment', kind: 'appointment' })

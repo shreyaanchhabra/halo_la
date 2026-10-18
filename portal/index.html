@@ -18,7 +18,11 @@
     <main>
       <section class="card">
         <h2>Patient</h2>
-        <label>Name <input id="patient-name" placeholder="e.g. Joe Martinez" /></label>
+        <div class="row">
+          <label>Name <input id="patient-name" placeholder="e.g. Joe Martinez" /></label>
+          <label>ZIP code <input id="patient-zip" inputmode="numeric" maxlength="5" placeholder="90024" /></label>
+        </div>
+        <p class="hint">The ZIP code is used to look up pharmacy prices on GoodRx.</p>
       </section>
 
       <section class="card">
@@ -60,6 +64,11 @@
           <button type="submit" id="rx-save">Upload prescription</button>
         </form>
         <ul id="prescriptions" class="list"></ul>
+      </section>
+      <section class="card">
+        <h2>Medicines</h2>
+        <p class="hint">From the prescriptions above. Pill counts go down when the patient taps "I took it". HALO flags a refill when about 7 days are left and looks up GoodRx prices with Browser Use. No order is placed.</p>
+        <ul id="medicines" class="list"></ul>
       </section>
     </main>
 

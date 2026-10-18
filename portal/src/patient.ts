@@ -1,12 +1,24 @@
 import './patient.css'
-import { addTranscript, esc, fileUrl, loadData, loadTranscripts, onDataChanged } from './api'
-import { appointments, formatTime, scheduleFor, ymd } from './schedule'
-import type { HaloData, TranscriptLine } from './types'
+import { addTranscript, esc, fileUrl, loadData, loadDoses, loadTranscripts, onDataChanged, setDose } from './api'
+import { appointments, formatTime, scheduleFor, ymd, type ScheduleItem } from './schedule'
+import type { DoseLog, HaloData, TranscriptLine } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
 
 let data: HaloData = { patient: { name: '' }, people: [], prescriptions: [] }
 let heard: TranscriptLine[] = []
+let doses: DoseLog[] = []
+
+const takenAt = (i: ScheduleItem) => doses.find(d => d.medKey === i.medKey && d.slot === i.slot)?.at
+const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+
+function doseControl(i: ScheduleItem) {
+  if (i.kind !== 'medicine') return ''
+  const at = takenAt(i)
+  return at
+    ? `<span class="taken">✓ Taken ${clockTime(at)} <button class="undo" data-undo="${esc(i.medKey!)}|${esc(i.slot!)}">Undo</button></span>`
+    : `<button class="took" data-took="${esc(i.medKey!)}|${esc(i.slot!)}">I took it</button>`
+}
 
 const nowHHMM = () => {
   const d = new Date()
@@ -26,20 +38,23 @@ function renderClock() {
 function renderSchedule() {
   const items = scheduleFor(data, new Date())
   const now = nowHHMM()
-  const next = items.find(i => !i.time || i.time >= now)
+  // Doses that are due and not yet taken come first, then whatever is next
+  const open = items.filter(i => !takenAt(i))
+  const next = open.find(i => i.kind === 'medicine' && i.time && i.time <= now) ?? open.find(i => !i.time || i.time >= now)
 
   $('next-up').innerHTML = next
     ? `<p class="label">Next</p>
        <p class="next-time">${next.time ? formatTime(next.time) : 'Today'}</p>
        <p class="next-title">${next.kind === 'medicine' ? 'Take ' : ''}${esc(next.title)}</p>
-       <p class="next-detail">${esc(next.detail)}</p>`
+       <p class="next-detail">${esc(next.detail)}</p>
+       ${doseControl(next)}`
     : `<p class="label">Next</p><p class="next-title">Nothing else planned today.</p>`
 
   $('today').innerHTML = items.length
     ? items.map(i => `
-      <li class="${i.time && i.time < now ? 'done' : ''} ${i === next ? 'is-next' : ''}">
+      <li class="${(i.kind === 'medicine' ? takenAt(i) : i.time && i.time < now) ? 'done' : ''} ${i === next ? 'is-next' : ''}">
         <span class="time">${i.time ? formatTime(i.time) : 'All day'}</span>
-        <span><b>${i.kind === 'medicine' ? 'Take ' : ''}${esc(i.title)}</b><small>${esc(i.detail)}</small></span>
+        <span><b>${i.kind === 'medicine' ? 'Take ' : ''}${esc(i.title)}</b><small>${esc(i.detail)}</small>${doseControl(i)}</span>
       </li>`).join('')
     : '<li class="empty">Nothing planned today.</li>'
 
@@ -86,13 +101,24 @@ function render() {
 
 function renderHeard() {
   $('heard').innerHTML = heard.slice(-8).reverse().map(l => `
-    <li><span class="time">${new Date(l.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>${esc(l.text)}</li>`).join('')
+    <li><span class="time">${clockTime(l.at)}</span>${esc(l.text)}</li>`).join('')
 }
 
 async function load() {
-  data = await loadData()
+  ;[data, doses] = await Promise.all([loadData(), loadDoses()])
   render()
 }
+
+document.addEventListener('click', async e => {
+  const { took, undo } = (e.target as HTMLElement).dataset
+  const target = took ?? undo
+  if (!target) return
+  const [medKey, slot] = target.split('|')
+  ;(e.target as HTMLButtonElement).disabled = true
+  await setDose(medKey, slot, Boolean(took))
+  doses = await loadDoses()
+  renderSchedule()
+})
 
 async function loadHeard() {
   heard = await loadTranscripts()

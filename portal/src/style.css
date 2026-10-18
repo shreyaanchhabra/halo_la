@@ -74,3 +74,13 @@ button.secondary { background: var(--card); color: var(--accent); }
 details { font-size: 0.9rem; color: var(--muted); }
 summary { cursor: pointer; }
 .list .actions { display: grid; gap: 8px; justify-items: end; align-content: start; }
+
+.stock-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.stock-form input { width: 9em; }
+.stock-form button { padding: 6px 10px; font-size: 0.85rem; }
+.refill { margin: 0; padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; display: grid; gap: 8px; }
+.refill p { margin: 0; color: inherit; }
+.refill.due { background: #fbf1dc; border: 1px solid #e3c27a; color: #5c3f00; }
+.refill.ok { background: #e3f1e8; border: 1px solid #a9d1b6; color: #1f4d30; }
+.refill-actions { display: flex; gap: 14px; align-items: center; }
+button.link:disabled { opacity: 0.5; cursor: wait; }
