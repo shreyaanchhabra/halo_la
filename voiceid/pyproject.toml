@@ -1,0 +1,22 @@
+[project]
+name = "voiceid"
+version = "0.1.0"
+description = "Offline, microphone-based speaker identification for registered voices"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26", "scipy>=1.11", "soundfile>=0.12.1",
+]
+
+[project.optional-dependencies]
+live = ["torch>=2.1", "torchaudio>=2.1", "speechbrain>=1.0.3,<1.2", "silero-vad>=5.1,<7", "sounddevice>=0.4.6,<0.6"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+voiceid = "voiceid.cli:main"
+
+[tool.setuptools]
+packages = ["voiceid"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs the real SpeechBrain model installed locally (skipped otherwise)"]

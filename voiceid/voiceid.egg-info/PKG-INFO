@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: voiceid
+Version: 0.1.0
+Summary: Offline, microphone-based speaker identification for registered voices
+Requires-Python: >=3.10
+Requires-Dist: numpy>=1.26
+Requires-Dist: scipy>=1.11
+Requires-Dist: soundfile>=0.12.1
+Provides-Extra: live
+Requires-Dist: torch>=2.1; extra == "live"
+Requires-Dist: torchaudio>=2.1; extra == "live"
+Requires-Dist: speechbrain<1.2,>=1.0.3; extra == "live"
+Requires-Dist: silero-vad<7,>=5.1; extra == "live"
+Requires-Dist: sounddevice<0.6,>=0.4.6; extra == "live"
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"

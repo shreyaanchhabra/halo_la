@@ -1,0 +1,13 @@
+numpy>=1.26
+scipy>=1.11
+soundfile>=0.12.1
+
+[dev]
+pytest>=8
+
+[live]
+torch>=2.1
+torchaudio>=2.1
+speechbrain<1.2,>=1.0.3
+silero-vad<7,>=5.1
+sounddevice<0.6,>=0.4.6
