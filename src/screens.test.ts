@@ -115,3 +115,30 @@ describe('glasses screens', () => {
     assert.equal(inLabel(120), 'in 2 hours')
   })
 })
+
+describe('family messages and doses', () => {
+  const message = { kind: 'message' as const, id: 'm1', text: 'Your family is coming over at 5 tomorrow, and bringing your favourite tea.' }
+  const dose = { kind: 'dose' as const, medKey: 'rx:0', slot: '2026-10-24 21:00', title: 'Donepezil 5 mg', time: '21:00', detail: 'At bedtime' }
+
+  test('a family message wraps onto short lines and asks for a tap', () => {
+    const s = buildScreen({ ...base, state: state(), care: message })
+    assert.match(s, /^Message from family/)
+    assert.match(s, /favourite tea\./)
+    assert.ok(s.split('\n').every(l => l.length <= 34))
+    assert.match(s, /Tap: got it/)
+  })
+
+  test('a due dose shows the medicine and its time', () => {
+    const s = buildScreen({ ...base, state: state(), care: dose })
+    assert.match(s, /Time for your medicine/)
+    assert.match(s, /Donepezil 5 mg/)
+    assert.match(s, /Due at 9 PM/)
+    assert.match(s, /Tap: I took it/)
+  })
+
+  test('a spoken question or reminder comes first', () => {
+    const prompt = { id: 'p1', lines: ['Park with Maya at 2 PM?', 'Say yes or no'], expiresAt: now.toISOString() }
+    assert.match(buildScreen({ ...base, state: state({ prompt }), care: message }), /Park with Maya/)
+    assert.match(buildScreen({ ...base, state: state(), reminder: plan({}), care: dose }), /^Coming up/)
+  })
+})

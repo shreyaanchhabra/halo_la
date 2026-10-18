@@ -1,11 +1,27 @@
+import * as Sentry from '@sentry/browser'
+import { careOperation } from './operations'
 import type { RefillState } from '../../shared/refill-types.ts'
-import type { DoseLog, GlassesState, HaloData, Medicine, Plan, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
+import type { DoseLog, GlassesState, HaloData, ImessageStatus, Medicine, Plan, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
-  const body = await res.json()
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`)
-  return body
+  const method = init?.method ?? 'GET'
+  const path = new URL(url, 'http://localhost').pathname
+  return Sentry.startSpan({
+    name: careOperation(method, path),
+    op: 'care.action',
+    attributes: { 'http.request.method': method },
+  }, async () => {
+    let res: Response
+    try {
+      res = await fetch(url, init)
+    } catch (err) {
+      Sentry.captureException(err)
+      throw err
+    }
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`)
+    return body
+  })
 }
 
 export async function loadData(): Promise<HaloData> {
@@ -56,6 +72,8 @@ export const setDose = (medKey: string, slot: string, taken: boolean) =>
 
 export const clearPrices = (key: string) => call(`/api/prices?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
 export const loadPrices = () => call<Record<string, PriceCheck>>('/api/prices')
+
+export const loadImessage = () => call<ImessageStatus>('/api/imessage')
 
 // Starts a Browser Use lookup on GoodRx; the result arrives later through onDataChanged
 export const checkPrices = (key: string, med: Medicine, zip: string) =>

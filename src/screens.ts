@@ -18,8 +18,13 @@ export type ScreenInput = {
   mic: Mic
   reminder: Plan | null // an event to remind about right now
   notice?: string | null // a message from this device, e.g. a clip that couldn't be sent
+  care?: CareCard | null // a family message or a dose that's due; stays until tapped
   debug?: string
 }
+
+export type CareCard =
+  | { kind: 'message'; id: string; text: string }
+  | { kind: 'dose'; medKey: string; slot: string; title: string; time: string; detail: string }
 
 export function fit(s: string, max = MAX_CHARS): string {
   const t = s.replace(/[\r\n\t]+/g, ' ').trim()
@@ -38,10 +43,9 @@ export function inLabel(mins: number): string {
   return `in ${h} hour${h === 1 ? '' : 's'}`
 }
 
-// Up to two short lines of what was heard, then how HALO took it
-function heardBlock(heard: GlassesState['heard']): string[] {
-  if (!heard) return []
-  const words = heard.text.replace(/\s+/g, ' ').trim().split(' ')
+// Word-wraps to at most maxLines short lines, ending in "..." when it doesn't fit
+export function wrap(text: string, maxLines: number): string[] {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ')
   const lines: string[] = []
   let line = ''
   for (const w of words) {
@@ -49,9 +53,22 @@ function heardBlock(heard: GlassesState['heard']): string[] {
     line = line ? `${line} ${w}` : w
   }
   if (line) lines.push(line)
-  const shown = lines.slice(0, 2).map(l => fit(l))
-  if (lines.length > 2) shown[1] = fit(shown[1], MAX_CHARS - 3) + '...'
-  return ['Heard:', ...shown, ...(heard.note ? [`(${heard.note})`] : [])]
+  const shown = lines.slice(0, maxLines).map(l => fit(l))
+  if (lines.length > maxLines) shown[maxLines - 1] = fit(shown[maxLines - 1], MAX_CHARS - 3) + '...'
+  return shown
+}
+
+// Up to two short lines of what was heard, then how HALO took it
+function heardBlock(heard: GlassesState['heard']): string[] {
+  if (!heard) return []
+  return ['Heard:', ...wrap(heard.text, 2), ...(heard.note ? [`(${heard.note})`] : [])]
+}
+
+function careScreen(card: CareCard): string[] {
+  if (card.kind === 'message') return ['Message from family', '', ...wrap(card.text, 5), '', 'Tap: got it']
+  const [h, m] = card.time.split(':').map(Number)
+  const due = new Date(2000, 0, 1, h, m)
+  return ['Time for your medicine', '', fit(card.title), ...wrap(card.detail, 2), `Due at ${timeLabel(due)}`, '', 'Tap: I took it']
 }
 
 function todayList(state: GlassesState, now: Date, room: number): string[] {
@@ -73,6 +90,7 @@ export function buildScreen(i: ScreenInput): string {
     if (i.reminder) {
       return ['Coming up', fit(planTitle(i.reminder)), `${timeLabel(new Date(i.reminder.start))}  (${inLabel(minutesUntil(i.reminder, i.now))})`]
     }
+    if (i.care) return careScreen(i.care)
     // header, date, gap, "Today", then the events; whatever was heard goes underneath, so events give way to it
     const extra = i.notice ? [i.notice] : heardBlock(i.state.heard)
     const room = MAX_LINES - 4 - (extra.length ? extra.length + 1 : 0) - (i.online ? 0 : 2) - (i.debug ? 2 : 0) - 1

@@ -1,5 +1,8 @@
 import './month.css'
 import './patient.css'
+import { initSentry } from './sentry'
+
+initSentry('patient')
 import { addTranscript, esc, fileUrl, loadAsk, loadData, loadDoses, loadPlans, loadRefills, loadTranscripts, onDataChanged, planAction, setDose } from './api'
 import { allMedicines, runningLow, supply, supplyText } from './meds'
 import { longDate, monthGridHtml, monthStart, monthTitle, shiftMonth, type Mark } from './month.ts'

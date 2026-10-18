@@ -90,6 +90,84 @@ export async function readPrescription(filePath: string, apiKey: string) {
   }
 }
 
+export type CaregiverAction =
+  | { type: 'approve_refill'; medKey: string }
+  | { type: 'check_prices'; medKey: string }
+  | { type: 'pause_alerts' }
+  | { type: 'resume_alerts' }
+  | { type: 'mark_taken'; medKey: string | null; time: string | null }
+  | { type: 'undo_taken' }
+  | { type: 'send_to_glasses'; text: string }
+
+const CAREGIVER_PROMPT = `You are HALO, a care assistant texting on iMessage with a family caregiver.
+Answer only from the care record below. If the record doesn't say, say you don't know.
+Write like a text message: 1 to 3 short sentences, plain text, no markdown, no emojis.
+Never give medical advice beyond what is written. For dosing changes or symptoms, tell them to call the doctor, or 911 in an emergency.
+Return only JSON: {"reply": "...", "action": null}
+Set "action" only when the caregiver clearly asks for one of these, using a medicine key from the record:
+{"type": "approve_refill", "medKey": "..."}
+{"type": "check_prices", "medKey": "..."}
+{"type": "pause_alerts"}
+{"type": "resume_alerts"}
+{"type": "mark_taken", "medKey": "..." or null, "time": "HH:MM" or null}
+  When they say the patient took or was given medicine. Use the 24-hour time of the dose from today's schedule.
+  Leave medKey null for "his 8pm pills"; leave both null for "he took his meds".
+{"type": "undo_taken"}
+  When they say a dose they just reported wasn't actually taken.
+{"type": "send_to_glasses", "text": "..."}
+  When they ask you to tell, remind, or pass something on to the patient. The patient reads it on their glasses.
+  Rewrite it as one short, warm sentence spoken to the patient, under 120 characters. Never put medical changes in it.
+  Call the sender "your family" unless they give their name.`
+
+export async function answerCaregiver(
+  apiKey: string,
+  record: string,
+  history: { from: 'caregiver' | 'halo'; text: string }[],
+  question: string,
+): Promise<{ reply: string; action: CaregiverAction | null }> {
+  const res = await fetch(`${GROQ}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: READER_MODEL,
+      temperature: 0.2,
+      reasoning_effort: 'none',
+      max_tokens: 400,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: `${CAREGIVER_PROMPT}\n\nCare record:\n${record}` },
+        // Past replies are shown in the JSON shape so the model keeps answering in it
+        ...history.map(h => h.from === 'halo'
+          ? { role: 'assistant', content: JSON.stringify({ reply: h.text, action: null }) }
+          : { role: 'user', content: h.text }),
+        { role: 'user', content: question },
+      ],
+    }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    // Groq rejects a plain-text answer in JSON mode but still returns it; that text is the reply
+    const plain = (() => { try { return JSON.parse(body).error?.failed_generation } catch { return null } })()
+    if (typeof plain === 'string' && plain.trim() && !plain.trim().startsWith('{')) return { reply: plain.trim(), action: null }
+    throw new Error(`Groq error ${res.status}: ${body.slice(0, 300)}`)
+  }
+
+  const raw: string = (await res.json()).choices[0].message.content
+  const json = raw.replace(/<think>[\s\S]*?<\/think>/g, '')
+  if (!json.includes('{')) return { reply: json.trim(), action: null }
+  const parsed = JSON.parse(json.slice(json.indexOf('{'), json.lastIndexOf('}') + 1))
+  const a = parsed.action
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+  const action: CaregiverAction | null =
+    a?.type === 'approve_refill' || a?.type === 'check_prices'
+      ? (str(a.medKey) ? { type: a.type, medKey: str(a.medKey)! } : null)
+      : a?.type === 'pause_alerts' || a?.type === 'resume_alerts' || a?.type === 'undo_taken' ? { type: a.type }
+      : a?.type === 'mark_taken' ? { type: a.type, medKey: str(a.medKey), time: /^\d{2}:\d{2}$/.test(a.time ?? '') ? a.time : null }
+      : a?.type === 'send_to_glasses' && str(a.text) ? { type: a.type, text: str(a.text)!.slice(0, 200) }
+      : null
+  return { reply: String(parsed.reply ?? '').trim(), action }
+}
+
 export async function transcribe(filePath: string, apiKey: string): Promise<string> {
   const form = new FormData()
   form.append('model', STT_MODEL)

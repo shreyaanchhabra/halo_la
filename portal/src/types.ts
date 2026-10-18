@@ -55,7 +55,9 @@ export type HaloData = {
   stock?: Record<string, Stock>
 }
 
-export type DoseLog = { medKey: string; slot: string; at: string } // slot: "YYYY-MM-DD HH:MM"
+export type DoseSource = 'imessage' | 'glasses'
+
+export type DoseLog = { medKey: string; slot: string; at: string; by?: DoseSource } // slot: "YYYY-MM-DD HH:MM"
 
 export type PriceQuote = { pharmacy: string; price: number; priceType: string }
 
@@ -75,3 +77,38 @@ export type TranscriptLine = { text: string; at: string; id?: string; speaker?: 
 
 // Plans HALO picks up from conversation (see shared/calendar.ts)
 export type { GlassesState, Plan, PlanStatus } from '../../shared/calendar.ts'
+
+export type TextAlertKind = 'missed' | 'refill' | 'prices'
+
+export type TextMessage = {
+  at: string
+  direction: 'in' | 'out'
+  handle: string // masked, e.g. "(•••) •••-0123"
+  text: string
+  alert?: TextAlertKind
+  glassesId?: string
+  glassesSeenAt?: string
+}
+
+// A caregiver's message waiting on, or already seen on, the patient's glasses
+export type GlassesMessage = { id: string; text: string; handle: string; sentAt: string; seenAt?: string }
+
+// What the glasses app shows: a family message first, then a dose that's due, then home
+export type GlassesView = {
+  patientName: string
+  message: { id: string; text: string } | null
+  due: { medKey: string; slot: string; title: string; time: string; detail: string } | null
+  next: { title: string; time: string; kind: 'medicine' | 'appointment' | 'plan' } | null
+  appointment: { title: string; date: string; time: string | null } | null
+}
+
+export type ImessageStatus = {
+  configured: boolean
+  agentNumber: string
+  glassesOnline?: boolean
+  error?: string
+  caregivers: { handle: string; linkedAt: string; paused: boolean }[]
+  messages: TextMessage[]
+  // Latest alert texted about each medicine, keyed by medicine key
+  alerts: Record<string, { kind: TextAlertKind; at: string }>
+}
