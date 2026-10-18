@@ -10,9 +10,9 @@ import {
 } from '@evenrealities/even_hub_sdk'
 import type { GlassesState, Plan } from '../shared/calendar.ts'
 import type { GlassesMenu } from '../portal/src/types.ts'
-import { API, getCare, getMenu, getState, markSeen, markTaken, postAudio, postWho, postStats } from './api.ts'
+import { API, getCare, getMenu, getState, markSeen, markNotTaken, markTaken, postAudio, postDoseAnswer, postWho, postStats } from './api.ts'
 import { AudioPipeline } from './audio/pipeline.ts'
-import { pressAction } from './buttons.ts'
+import { canListenForConversation, pressAction } from './buttons.ts'
 import type { SegmenterOptions } from './audio/segmenter.ts'
 import { GlassesMessaging } from './messaging.ts'
 import {
@@ -70,11 +70,13 @@ type Mode = { at: 'home' } | { at: 'page'; page: MenuPage; index: number }
 let mode: Mode = { at: 'home' }
 let menu: GlassesMenu | null = null
 let menuIdle: ReturnType<typeof setTimeout> | undefined
+const canListen = () => canListenForConversation({ onToday: mode.at === 'home', paused: userPaused })
 
 // Approved-contact messages and voice replies. Calendar questions, reminders and care cards come first.
 const messaging = new GlassesMessaging(refresh)
 let replyPipeline: AudioPipeline | null = null
 let startingReply = false
+let doseRetryTimer: ReturnType<typeof setTimeout> | undefined
 
 const nowDate = () => new Date(Date.now() + skewMs)
 
@@ -82,6 +84,56 @@ const nowDate = () => new Date(Date.now() + skewMs)
 
 const withTimeout = <T>(p: Promise<T>, ms = BRIDGE_TIMEOUT_MS) =>
   Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('bridge timeout')), ms))])
+
+function answeringDose(): CareCard | null {
+  return care?.kind === 'dose'
+    && mode.at === 'home'
+    && !state?.prompt && !state?.resolved
+    && !reminder && !messaging.visible && !userPaused
+    ? care
+    : null
+}
+
+async function sendUtterance(wav: Uint8Array) {
+  if (!canListen()) return
+  const dose = answeringDose()
+  const reply = dose ? await postDoseAnswer(wav) : await postAudio(wav)
+  console.log(`[halo] heard "${reply.text}" -> ${reply.kind}${reply.error ? ' (' + reply.error + ')' : ''}`)
+  if (dose?.kind === 'dose') {
+    const key = cardKey(dose)
+    if (reply.answer !== 'yes' && reply.answer !== 'no') {
+      tapped.add(key)
+      care = null
+      flash(reply.text ? 'I heard you. Say taken or not taken.' : "I didn't catch that. Please say taken or not taken.", 4000)
+      clearTimeout(doseRetryTimer)
+      doseRetryTimer = setTimeout(() => {
+        tapped.delete(key)
+        void poll()
+      }, 4000)
+    } else if (care?.kind === 'dose' && cardKey(care) === key
+      && (mode.at === 'home' || (mode.at === 'page' && mode.page === 'medications'))
+      && !state?.prompt && !state?.resolved && !reminder) {
+      tapped.add(key)
+      care = null
+      try {
+        if (reply.answer === 'yes') {
+          await markTaken(dose.medKey, dose.slot)
+          flash(`${dose.title} marked taken.`, 4000)
+        } else {
+          await markNotTaken(dose.medKey, dose.slot)
+          flash(`${dose.title} is not marked taken.`, 4000)
+        }
+      } catch (err) {
+        console.warn('[halo] dose answer failed to save', err)
+        tapped.delete(key)
+        flash("Couldn't save that answer. Please try again.")
+      }
+    } else {
+      flash('That dose prompt is no longer active. Please check with your caregiver.', 5000)
+    }
+  }
+  void poll()
+}
 
 const CONTAINER = { id: 1, name: 'main' }
 const INPUT = { id: 2, name: 'input' }
@@ -93,7 +145,7 @@ function screen(): string {
   if (mode.at === 'page') {
     messaging.suspend()
     replyPipeline = null
-    return layoutForDisplay(detailScreen(mode.page, menu, nowDate(), mode.index).text)
+    return layoutForDisplay(detailScreen(mode.page, menu, nowDate(), mode.index, notice).text)
   }
   const canShow = !userPaused && state && online && !state.prompt && !state.resolved && !reminder && !care && !person
   const message = canShow ? messaging.screen() : null
@@ -165,12 +217,8 @@ shown = wanted
 
 const pipeline = new AudioPipeline({
   segmenter: segmenterOverrides,
-  send: async wav => {
-    const reply = await postAudio(wav)
-    console.log(`[halo] heard "${reply.text}" -> ${reply.kind}${reply.error ? ' (' + reply.error + ')' : ''}`)
-    void poll() // show the question or the answer straight away
-  },
-  onPartial: wav => { void postWho(wav).then(() => poll()).catch(() => {}) },
+  send: sendUtterance,
+onPartial: wav => { if (canListen()) void postWho(wav).then(() => poll()).catch(() => {}) },
   onError: err => { console.warn('[halo] upload failed', err); flash("Couldn't hear that. Please say it again.") },
 })
 
@@ -183,7 +231,7 @@ function toBytes(x: unknown): Uint8Array | null {
 
 function onAudio(raw: unknown) {
   lastAudioAt = Date.now()
-  if (mic !== 'on' || userPaused) return
+  if (mic !== 'on' || !canListen()) return
   const pcm = toBytes(raw)
   if (!pcm?.length) return
   if (messaging.visible || startingReply) {
@@ -195,12 +243,16 @@ function onAudio(raw: unknown) {
 
 async function startMic() {
   clearTimeout(micRetry)
-  if (userPaused) return
+  if (!canListen()) return
   if (MIC_INJECTED) { mic = 'on'; refresh(); return }
   try {
     mic = (await withTimeout(bridge.audioControl(true, AudioInputSource.Glasses))) ? 'on' : 'off'
   } catch (err) {
     console.warn('[halo] microphone failed to start', err)
+    mic = 'off'
+  }
+  if (!canListen() && mic === 'on') {
+    try { await withTimeout(bridge.audioControl(false)) } catch (err) { console.warn('[halo] microphone failed to stop after menu navigation', err) }
     mic = 'off'
   }
   if (mic === 'off') micRetry = setTimeout(() => void startMic(), MIC_RETRY_MS)
@@ -209,6 +261,7 @@ async function startMic() {
 
 // The microphone link can drop (a Bluetooth hiccup, the phone sleeping). Notice, and reopen it.
 async function restartMic() {
+  if (!canListen()) return
   lastMicRestart = Date.now()
   console.warn('[halo] microphone stalled, restarting it')
   flash('Mic stopped. Restarting it...', 5000)
@@ -222,7 +275,7 @@ async function restartMic() {
 
 const watchdog = setInterval(() => {
   const stalled = Date.now() - lastAudioAt > MIC_STALL_MS
-  if (!MIC_INJECTED && mic === 'on' && !userPaused && stalled && Date.now() - lastMicRestart > MIC_RESTART_COOLDOWN_MS) void restartMic()
+  if (!MIC_INJECTED && mic === 'on' && canListen() && stalled && Date.now() - lastMicRestart > MIC_RESTART_COOLDOWN_MS) void restartMic()
 }, 1000)
 
 async function stopMic() {
@@ -274,12 +327,12 @@ function careCard(view: Awaited<ReturnType<typeof getCare>>): CareCard | null {
 }
 
 async function tapCare(card: CareCard) {
+  if (card.kind !== 'message') return
   tapped.add(cardKey(card))
   care = null
-  flash(card.kind === 'message' ? 'Got it.' : `${card.title} taken. Thank you.`, 4000)
+  flash('Got it.', 4000)
   try {
-    if (card.kind === 'message') await markSeen(card.id)
-    else await markTaken(card.medKey, card.slot)
+    await markSeen(card.id)
   } catch (err) {
     console.warn('[halo] tap failed to save', err)
     tapped.delete(cardKey(card))
@@ -294,6 +347,7 @@ function goHome() {
   clearTimeout(menuIdle)
   if (mode.at === 'home') return
   mode = { at: 'home' }
+  if (!userPaused) void startMic()
   refresh()
 }
 
@@ -314,6 +368,7 @@ async function loadMenu() {
 
 function openPage(page: MenuPage) {
   mode = { at: 'page', page, index: 0 }
+  void stopMic()
   touchMenu()
   refresh()
   void loadMenu()
@@ -341,8 +396,8 @@ async function poll() {
     failures = 0
     online = true
     checkReminders()
-    if (view) { care = careCard(view); person = view.person ?? null }
-    if (interrupting()) goHome()
+    if (view) { care = careCard(view); person = mode.at === 'home' ? view.person ?? null : null }
+    if (mode.at === 'home' && interrupting()) goHome()
     else if (mode.at === 'page') void loadMenu()
     await messaging.poll()
   } catch (err) {
@@ -360,7 +415,7 @@ async function poll() {
 
 const pollTimer = setInterval(() => void poll(), POLL_MS)
 const statsTimer = setInterval(() => {
-  if (mic !== 'on') return
+  if (mic !== 'on' || !canListen()) return
   const s = pipeline.stats()
   void postStats({ ...s, at: new Date().toISOString(), source: 'glasses', segmenter: segmenterOverrides }).catch(() => {})
   if (DEBUG) console.log('[halo] mic', JSON.stringify(s))
@@ -381,6 +436,7 @@ async function cleanup() {
   clearInterval(watchdog)
   clearTimeout(reminderTimer)
   clearTimeout(menuIdle)
+  clearTimeout(doseRetryTimer)
   await stopMic()
   unsubscribe()
 }
@@ -409,8 +465,8 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     const action = pressAction(type === OsEventTypeList.CLICK_EVENT ? 'click' : 'double', { onPage: mode.at === 'page', paused: userPaused })
     if (action === 'home') goHome()
     else if (action === 'toggle-pause') void togglePause()
-    // At home, a family message or due dose on screen is acknowledged with a tap; anything else is answered by voice
-    else if (care && !interrupting()) void tapCare(care)
+    // Family messages are acknowledged with a tap; medication prompts require a spoken answer.
+    else if (care?.kind === 'message' && !interrupting()) void tapCare(care)
     else if (messaging.visible) void messaging.click()
     return
   }
@@ -433,7 +489,7 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     // These also fire when the glasses menu opens and closes over the page, so the mic keeps running
     // through them; if it did stop, the watchdog restarts it.
     case OsEventTypeList.FOREGROUND_ENTER_EVENT:
-      if (mic === 'off') void startMic()
+      if (mic === 'off' && canListen()) void startMic()
       void poll()
       break
     case OsEventTypeList.FOREGROUND_EXIT_EVENT:

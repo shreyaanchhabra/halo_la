@@ -1,10 +1,10 @@
-import type { IncomingMessage, MessageContact, MessageReply, MessageState, MessagingData } from '../../shared/messages.ts'
+import type { IncomingMessage, MessageContact, MessageReply, MessageState, MessagingData, OutgoingMessage } from '../../shared/messages.ts'
 
 export class MessageError extends Error {
   status: number
   constructor(message: string, status = 400) { super(message); this.status = status }
 }
-export const emptyMessages = (): MessagingData => ({ contacts: [], messages: [], replies: [], activity: [] })
+export const emptyMessages = (): MessagingData => ({ contacts: [], messages: [], replies: [], outgoing: [], activity: [] })
 function text(value: unknown, field: string, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(value)) throw new MessageError(`${field} is required (maximum ${max} characters)`)
   return value.trim()
@@ -25,6 +25,30 @@ export class MessageService {
   }
   private log(text: string, sourceId: string) { this.data.activity.push({ at: this.clock().toISOString(), text, sourceId }) }
   private contact(from: string) { return this.data.contacts.find(c => c.phone === from && c.approved) }
+  isApprovedContact(value: unknown): boolean {
+    try { return Boolean(this.contact(phone(value))) } catch { return false }
+  }
+  recordOutgoing(input: Omit<OutgoingMessage, 'id' | 'sentAt'> & { sentAt?: string }) {
+    const to = phone(input.to)
+    const providerId = text(input.providerId, 'providerId', 200)
+    const body = text(input.text, 'text', 2000)
+    if (input.kind !== 'halo' && input.kind !== 'care') throw new MessageError('Invalid outgoing message kind')
+    if (!this.data.contacts.some(contact => contact.phone === to)) throw new MessageError('Recipient is not a known messaging contact', 403)
+    const old = this.data.outgoing.find(m => m.providerId === providerId)
+    if (old) {
+      if (old.to !== to || old.text !== body) throw new MessageError('Provider ID already used for a different outgoing message', 409)
+      return old
+    }
+    const sentAt = typeof input.sentAt === 'string' && Number.isFinite(Date.parse(input.sentAt))
+      ? new Date(input.sentAt).toISOString()
+      : this.clock().toISOString()
+    const m: OutgoingMessage = { id: crypto.randomUUID(), providerId, to, text: body, kind: input.kind, sentAt }
+    this.data.outgoing.push(m)
+    if (this.data.outgoing.length > 200) this.data.outgoing = this.data.outgoing.slice(-200)
+    this.log('HALO sent a caregiver text', m.id)
+    this.persist()
+    return m
+  }
   private getMessage(id: string): IncomingMessage {
     const m = this.data.messages.find(m => m.id === id)
     if (!m) throw new MessageError('Message not found', 404)
@@ -57,7 +81,10 @@ export class MessageService {
       if (old.from !== from || old.text !== body) throw new MessageError('Provider ID already used for a different message', 409)
       return old
     }
-    const m: IncomingMessage = { id: crypto.randomUUID(), providerId, from, text: body, receivedAt: this.clock().toISOString(), allowedOnArrival: Boolean(this.contact(from)), dismissed: false, demo }
+    const receivedAt = typeof input.receivedAt === 'string' && Number.isFinite(Date.parse(input.receivedAt))
+      ? new Date(input.receivedAt).toISOString()
+      : this.clock().toISOString()
+    const m: IncomingMessage = { id: crypto.randomUUID(), providerId, from, text: body, receivedAt, allowedOnArrival: Boolean(this.contact(from)), dismissed: false, demo }
     this.data.messages.push(m)
     this.log(m.allowedOnArrival ? 'Message queued for glasses' : 'Unapproved message withheld from glasses', m.id)
     this.persist()

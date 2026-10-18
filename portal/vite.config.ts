@@ -10,6 +10,7 @@ import { calendarRoutes } from './server/calendar-routes.ts'
 import { refillRoutes } from './server/refill-routes.ts'
 import { messageRoutes } from './server/message-routes.ts'
 import { createImessage, formatNumber } from './server/photon'
+import { configurePhotonMessaging, isApprovedMessageContact, receivePhotonMessage, recordPhotonOutgoing } from './server/message-routes.ts'
 import { finishRequest, initCareSentry, reportError, traceCareRequest, tracePriceLookup, traceStep } from './server/sentry'
 import { createVoices } from './server/voices.ts'
 import type { DoseLog, DoseSource, HaloData, ImessageStatus, Medicine, PriceCheck } from './src/types'
@@ -113,11 +114,21 @@ function jsonStore(keys: Keys): Plugin {
       const readDoses = () => readJson<DoseLog[]>(DOSES_FILE, [])
       // slot is "YYYY-MM-DD HH:MM"; taken: false undoes a dose
       const setDose = (medKey: string, slot: string, taken: boolean, by?: DoseSource) => {
-        const doses = readDoses().filter(d => !(d.medKey === medKey && d.slot === slot))
-        if (taken) doses.push({ medKey, slot, at: new Date().toISOString(), ...(by ? { by } : {}) })
+        const current = readDoses()
+        const wasTaken = current.some(d => d.medKey === medKey && d.slot === slot)
+        if (wasTaken === taken) return
+        const at = new Date().toISOString()
+        const doses = current.filter(d => !(d.medKey === medKey && d.slot === slot))
+        if (taken) doses.push({ medKey, slot, at, ...(by ? { by } : {}) })
         writeJson(DOSES_FILE, doses)
         refills.check() // a dose can take the pill count down to 7 days
         notify()
+        if (imessage) {
+          void imessage.doseUpdated(medKey, slot, taken, at).catch(err => {
+            console.error('[halo] could not notify family about dose update:', err)
+            reportError(err)
+          })
+        }
       }
       const glasses = createGlasses(GLASSES_FILE, notify)
       const saveData = (data: HaloData) => { writeJson(DATA_FILE, data); notify() }
@@ -149,11 +160,30 @@ function jsonStore(keys: Keys): Plugin {
           glasses,
           refills: refills.refills,
           voices,
+          readPlans: () => calendar.cal.plans(),
+          receiveMessage: receivePhotonMessage,
+          recordOutgoing: recordPhotonOutgoing,
+          isApprovedContact: isApprovedMessageContact,
           notify,
         })
         : null
+      configurePhotonMessaging(imessage ? {
+        send: reply => imessage.sendReviewedReply(reply),
+        status: () => {
+          const status = imessage.status()
+          return {
+            configured: status.configured,
+            agentNumber: status.agentNumber,
+            connected: imessage.connectedPhones(),
+            ...(status.error ? { error: status.error } : {}),
+          }
+        },
+      } : null)
       imessage?.start()
-      server.httpServer?.once('close', () => imessage?.stop())
+      server.httpServer?.once('close', () => {
+        imessage?.stop()
+        configurePhotonMessaging(null)
+      })
 
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://x')
@@ -195,7 +225,8 @@ function jsonStore(keys: Keys): Plugin {
             res.end(JSON.stringify(readJson(DOSES_FILE, [])))
           } else if (url.pathname === '/api/doses' && req.method === 'POST') {
             const { medKey, slot, taken, by } = JSON.parse((await readBody(req)).toString())
-            setDose(String(medKey), String(slot), taken !== false, by === 'glasses' ? 'glasses' : undefined)
+            const source: DoseSource = by === 'glasses' || by === 'patient' ? by : 'family'
+            setDose(String(medKey), String(slot), taken !== false, source)
             res.end('{"ok":true}')
           } else if (url.pathname === '/api/glasses' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')

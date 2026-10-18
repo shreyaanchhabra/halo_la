@@ -12,7 +12,7 @@ import { downloadIcs, formatTime, ymd } from './schedule'
 import { formatCents, type RefillState } from '../../shared/refill-types.ts'
 import { dateLabel, planTitle, startOfDay, timeLabel } from '../../shared/format.ts'
 import { matchLabel, startLiveAudio, startWhoAudio, type LiveAudio } from './live-audio'
-import type { DoseLog, HaloData, HeardClip, ImessageStatus, Person, Plan, PriceCheck, Prescription, TextAlertKind, TextMessage, VoiceStatus } from './types'
+import type { DoseLog, HaloData, HeardClip, ImessageStatus, Person, Plan, PriceCheck, Prescription, TextAlertKind, VoiceStatus } from './types'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -89,8 +89,12 @@ function renderPrices(e: MedEntry) {
 
 const TEXTED: Record<TextAlertKind, string> = {
   missed: 'Texted family about a missed dose',
+  taken: 'Texted family that this dose was taken',
+  dose_update: 'Texted family about a dose update',
   refill: 'Texted family about this refill',
   prices: 'Texted family the GoodRx prices',
+  appointment: 'Texted family an appointment reminder',
+  checkin: 'Sent the daily family check-in',
 }
 
 function renderTexted(e: MedEntry) {
@@ -300,29 +304,6 @@ function renderReading(rx: Prescription) {
     </div>`
 }
 
-function renderImessage() {
-  const s = imessage
-  if (!s?.configured) {
-    $('imessage').innerHTML = '<p class="status error">Texting is off. Add PHOTON_PROJECT_ID, PHOTON_API_KEY and PHOTON_AGENT_NUMBER to portal/.env, then restart the portal.</p>'
-    return
-  }
-  const glasses = (m: TextMessage) => m.glassesId
-    ? ` · sent to glasses, ${m.glassesSeenAt ? `seen ${clockTime(m.glassesSeenAt)}` : 'not seen yet'}`
-    : ''
-  $('imessage').innerHTML = `
-    <p class="connect">Text <b>hi</b> to <b>${esc(s.agentNumber)}</b> from your iPhone to connect.</p>
-    ${s.error ? `<p class="status error">${esc(s.error)}</p>` : ''}
-    <p class="status">${s.caregivers.length
-      ? `Connected: ${s.caregivers.map(c => `<span class="tag">${esc(c.handle)}${c.paused ? ' · alerts paused' : ''}</span>`).join(' ')}`
-      : 'No one connected yet.'}</p>
-    <p class="status">Patient's glasses: ${s.glassesOnline ? 'connected' : 'offline'}. Text HALO "tell ${esc(data.patient.name.split(' ')[0] || 'them')}…" to send a message there.</p>
-    ${s.messages.length ? `<ol class="thread">${s.messages.slice(-12).map(m => `
-      <li class="${m.direction}">
-        <span class="bubble">${esc(m.text)}</span>
-        <small>${m.direction === 'in' ? esc(m.handle) : m.alert ? 'HALO alert' : 'HALO'} · ${clockTime(m.at)}${glasses(m)}</small>
-      </li>`).join('')}</ol>` : ''}`
-}
-
 const firstName = () => (data.patient.name || 'the patient').split(' ')[0]
 
 function voiceTag(p: Person) {
@@ -373,7 +354,6 @@ function renderVoices() {
 
 function render() {
   renderPlans()
-  renderImessage()
   renderPatientVoice()
   renderVoices()
   $('people').innerHTML = data.people.length
@@ -720,7 +700,7 @@ document.addEventListener('click', async e => {
   if (doseTake || doseUndo) {
     const [medKey, slot] = (doseTake ?? doseUndo)!.split('|')
     ;(e.target as HTMLButtonElement).disabled = true
-    try { await setDose(medKey, slot, Boolean(doseTake)) } catch (err) { alert(err instanceof Error ? err.message : String(err)) }
+    try { await setDose(medKey, slot, Boolean(doseTake), 'family') } catch (err) { alert(err instanceof Error ? err.message : String(err)) }
     return load()
   }
   if (refillReject) return refillStep(refillReject, 'reject')

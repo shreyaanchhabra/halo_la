@@ -67,8 +67,8 @@ export const setPresent = (here: string[]) => call<string[]>('/api/present', jso
 
 export const loadDoses = () => call<DoseLog[]>('/api/doses')
 
-export const setDose = (medKey: string, slot: string, taken: boolean) =>
-  call('/api/doses', { method: 'POST', body: JSON.stringify({ medKey, slot, taken }) })
+export const setDose = (medKey: string, slot: string, taken: boolean, by?: 'patient' | 'family') =>
+  call('/api/doses', { method: 'POST', body: JSON.stringify({ medKey, slot, taken, ...(by ? { by } : {}) }) })
 
 export const clearPrices = (key: string) => call(`/api/prices?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
 export const loadPrices = () => call<Record<string, PriceCheck>>('/api/prices')

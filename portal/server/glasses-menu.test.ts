@@ -46,7 +46,7 @@ describe('the glasses menu', () => {
     ])
   })
 
-  test('medicines with their times, doses taken today, and whether they are running low', () => {
+  test('medicines include remaining pills, their times, doses taken today, and whether they are running low', () => {
     const d = data({
       medicines: [med({}), med({ name: 'Memantine', times: ['09:00'] }), med({ name: 'Old pill', stopped: true })],
       stock: { [medKey('rx1', 1)]: { count: 5, at: '2026-10-20T00:00:00Z' } },
@@ -56,11 +56,16 @@ describe('the glasses menu', () => {
       { medKey: medKey('rx1', 0), slot: '2026-10-23 20:00', at: '2026-10-23T20:05:00' },
     ]
     const m = glassesMenu(d, doses, [], now)
-    assert.deepEqual(m.medicines.map(x => [x.title, x.times, x.takenToday, x.low]), [
-      ['Donepezil 5 mg', ['08:00', '20:00'], 1, false],
-      ['Memantine 5 mg', ['09:00'], 0, true],
+    assert.deepEqual(m.medicines.map(x => [x.title, x.times, x.takenToday, x.doseStatuses, x.pillsLeft, x.low]), [
+      ['Donepezil 5 mg', ['08:00', '20:00'], 1, [{ time: '08:00', taken: true }, { time: '20:00', taken: false }], 58, false],
+      ['Memantine 5 mg', ['09:00'], 0, [{ time: '09:00', taken: false }], 5, true],
     ])
     assert.equal(m.medicines[1].daysLeft, 5)
+  })
+
+  test('medicines with no prescribed quantity or stock report an unknown pill count', () => {
+    const m = glassesMenu(data({ medicines: [med({ quantity: undefined })] }), [], [], now)
+    assert.equal(m.medicines[0].pillsLeft, null)
   })
 
   test('the family, as the portal has them', () => {

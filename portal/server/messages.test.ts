@@ -82,6 +82,27 @@ test('phone numbers normalize formatting but do not guess a country', () => {
   assert.throws(() => phone('2025550101'), /international/)
   assert.throws(() => phone('Maya'), /international/)
 })
+test('only explicitly approved numbers are eligible for Photon messaging', () => {
+  const f = fixture()
+  assert.equal(f.service.isApprovedContact('+12025550101'), false)
+  f.service.upsertContact(f.contact)
+  assert.equal(f.service.isApprovedContact('+1 (202) 555-0101'), true)
+  f.service.upsertContact({ ...f.contact, approved: false })
+  assert.equal(f.service.isApprovedContact('+12025550101'), false)
+})
+test('outgoing Photon messages are retained once for known contacts', () => {
+  const f = fixture()
+  const outgoing = { providerId: 'photon-out-1', to: f.contact.phone, text: 'A warm care update', kind: 'care' as const }
+  assert.throws(() => f.service.recordOutgoing(outgoing), /not a known/)
+  f.service.upsertContact(f.contact)
+  const saved = f.service.recordOutgoing(outgoing)
+  assert.equal(f.service.recordOutgoing(outgoing), saved)
+  assert.equal(f.service.data.outgoing.length, 1)
+  assert.equal(saved.to, f.contact.phone)
+  assert.throws(() => f.service.recordOutgoing({ ...outgoing, text: 'Different body' }), /already used/)
+  f.service.upsertContact({ ...f.contact, approved: false })
+  assert.equal(f.service.recordOutgoing({ ...outgoing, providerId: 'photon-out-2' }).providerId, 'photon-out-2')
+})
 test('live incoming messages cannot silently use demo delivery', async () => {
   const f = fixture(); f.service.upsertContact(f.contact)
   const r = f.service.draft(f.receive().id, 'Hello')

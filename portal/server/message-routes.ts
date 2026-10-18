@@ -6,10 +6,12 @@ import type { IncomingMessage as Request, ServerResponse } from 'node:http'
 import { emptyMessages, MessageError, MessageService, type MessageTransport } from './messages.ts'
 import { transcribeWav } from './groq.ts'
 import type { MessagingData } from '../../shared/messages.ts'
+import type { MessageReply } from '../../shared/messages.ts'
 
 const file = process.env.HALO_MESSAGES_FILE ?? fileURLToPath(new URL('../data/family-messages.json', import.meta.url))
 const memory = file === ':memory:'
-const data: MessagingData = !memory && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : emptyMessages()
+const loaded: Partial<MessagingData> = !memory && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
+const data: MessagingData = { ...emptyMessages(), ...loaded }
 // An interrupted send is ambiguous after restart. Never automatically send it again.
 for (const r of data.replies) if (r.status === 'sending') r.status = 'unknown'
 const service = new MessageService(data, () => {
@@ -19,8 +21,8 @@ const service = new MessageService(data, () => {
   fs.renameSync(`${file}.tmp`, file)
 })
 
-// HALO adapter contract, not a claim about Photon's API. The adapter translates to the provider.
-const transport: MessageTransport = {
+// Optional generic bridge for non-Photon development setups.
+const adapterTransport: MessageTransport = {
   mode: process.env.HALO_MESSAGE_SEND_URL ? 'live' : 'demo',
   async send(reply) {
     const destination = new URL(process.env.HALO_MESSAGE_SEND_URL!)
@@ -35,6 +37,36 @@ const transport: MessageTransport = {
     if (typeof result.providerId !== 'string' || !result.providerId) throw new Error('Adapter must return providerId')
     return result.providerId
   },
+}
+
+type PhotonIntegration = {
+  send: (reply: MessageReply) => Promise<string>
+  status: () => { configured: boolean; agentNumber: string; connected: string[]; error?: string }
+}
+
+let photon: PhotonIntegration | null = null
+
+export function configurePhotonMessaging(integration: PhotonIntegration | null) {
+  photon = integration
+}
+
+export function receivePhotonMessage(input: { providerId: string; from: string; text: string; receivedAt: string }) {
+  return service.receive(input)
+}
+
+export function recordPhotonOutgoing(input: { providerId: string; to: string; text: string; kind: 'halo' | 'care' }) {
+  return service.recordOutgoing(input)
+}
+
+export function isApprovedMessageContact(handle: string): boolean {
+  return service.isApprovedContact(handle)
+}
+
+function currentTransport(): MessageTransport {
+  const integration = photon
+  return integration
+    ? { mode: 'live', send: reply => integration.send(reply) }
+    : adapterTransport
 }
 
 async function body(req: Request, max = 16_384): Promise<Buffer> {
@@ -60,7 +92,11 @@ export async function messageRoutes(req: Request, res: ServerResponse, url: URL,
   const route = `${req.method} ${url.pathname}`
   try {
     if (route === 'GET /api/messages/state') send(service.state())
-    else if (route === 'GET /api/messages') send({ ...data, mode: transport.mode })
+    else if (route === 'GET /api/messages') send({
+      ...data,
+      mode: photon?.status().configured ? 'photon' : currentTransport().mode,
+      photon: photon?.status() ?? { configured: false, agentNumber: '', connected: [] },
+    })
     else if (route === 'POST /api/messages/contacts') send(service.upsertContact(await json(req)))
     else if (route === 'POST /api/messages/demo') send(service.receive(await json(req), true), 201)
     else if (route === 'POST /api/messages/incoming') {
@@ -85,7 +121,7 @@ export async function messageRoutes(req: Request, res: ServerResponse, url: URL,
         if (!transcript) throw new MessageError('No speech recognized. Hold to try again.')
         send(service.draft(id, transcript), 201)
       }
-      if (action === 'confirm') send(await service.confirm(id, await json(req), transport))
+      if (action === 'confirm') send(await service.confirm(id, await json(req), currentTransport()))
     }
   } catch (e) {
     send({ error: e instanceof MessageError ? e.message : 'Messaging request failed' }, e instanceof MessageError ? e.status : 500)

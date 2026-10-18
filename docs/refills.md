@@ -21,7 +21,7 @@ Save the patient's **ZIP code** on the setup page. Prices are looked up for that
 
 | What | Where |
 | --- | --- |
-| Pill count (one count, shared with the patient's "I took it" button) | `portal/src/meds.ts`: family count (`stock`) minus doses taken since |
+| Pill count (one count, shared with the patient's dose confirmations) | `portal/src/meds.ts`: family count (`stock`) minus doses taken since |
 | Refill lifecycle and approval rules | `portal/server/refills.ts` |
 | Errands agent: GoodRx price lookup through Browser Use | `portal/server/errands.ts`, `portal/server/goodrx.ts` |
 | Endpoints | `portal/server/refill-routes.ts` |
@@ -38,6 +38,8 @@ Refills are re-checked whenever a dose is logged, the care data is saved (a new 
 - Approval needs the family member's name, the exact price that was shown, prices that are not out of date (6 hours), and a price within the spending limit (default $25; set it in the Medicines card).
 - Approving twice never adds a second reminder.
 - "Not now" stops HALO looking again until the family asks. A failed lookup waits for a person and is never retried automatically.
+- The glasses Medications page shows each medicine's remaining pill count and taken status. The microphone is off on menu pages; on Today, when a dose is due, the glasses ask for a spoken yes or no. Yes records it as taken in the portal, and no leaves it unmarked as taken. The prompt does not appear before the scheduled time.
+- When a patient or family member marks a dose taken or undoes that mark on the glasses or portal, HALO texts active, approved Photon family contacts. Repeating the same state does not send a duplicate update.
 - The pickup reminder is for tomorrow at 10:00. Move it on the calendar if you go at another time.
 - "I have it" adds the tablets to the pill count once. GoodRx may offer the closest size; the count goes up by the size that was priced.
 

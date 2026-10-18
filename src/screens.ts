@@ -83,7 +83,7 @@ function careScreen(card: CareCard): string[] {
   if (card.kind === 'message') return ['Message from family', '', ...wrap(card.text, 5), '', 'Tap: got it']
   const [h, m] = card.time.split(':').map(Number)
   const due = new Date(2000, 0, 1, h, m)
-  return ['Time for your medicine', '', fit(card.title), ...wrap(card.detail, 2), `Due at ${timeLabel(due)}`, '', 'Tap: I took it']
+  return ['Did you take this medicine?', '', fit(card.title), ...wrap(card.detail, 2), `Due at ${timeLabel(due)}`, '', 'Say taken or not taken']
 }
 
 const yourRelation = (relation: string) => (relation ? `your ${relation.toLowerCase().replace(/^(your|my|his|her)\s+/, '')}` : '')
@@ -169,7 +169,8 @@ function pageBlocks(page: MenuPage, menu: GlassesMenu, now: Date): string[][] {
       [low ? `${low} ${low === 1 ? 'is' : 'are'} running low` : 'None running low'],
       ...menu.medicines.map(m => [
         fit(m.title),
-        m.times.length ? fit(`${m.times.map(clock).join(', ')}  (${m.takenToday} of ${m.times.length} taken)`) : 'No set times',
+        ...(m.doseStatuses.length ? m.doseStatuses.map(d => fit(`${clock(d.time)}: ${d.taken ? 'Taken' : 'Not taken'}`)) : ['No set times']),
+        m.pillsLeft == null ? 'Pill count not set' : `${m.pillsLeft} ${m.pillsLeft === 1 ? 'pill' : 'pills'} left`,
         ...(m.low ? [m.daysLeft != null ? `! Running low: ${m.daysLeft} day${m.daysLeft === 1 ? '' : 's'} left` : '! Running low'] : []),
       ]),
     ]
@@ -192,8 +193,9 @@ function paginate(blocks: string[][], size: number): string[][] {
 }
 
 // Title, the page's lines, then how to get around: swipe for the next page, tap to go back home
-export function detailScreen(page: MenuPage, menu: GlassesMenu | null, now: Date, index: number): { text: string; pages: number } {
+export function detailScreen(page: MenuPage, menu: GlassesMenu | null, now: Date, index: number, notice?: string | null): { text: string; pages: number } {
   const title = PAGE_TITLES[page]
+  if (page === 'medications' && notice) return { text: ['Medication update', '', ...wrap(notice, 2), '', 'Tap: back'].join('\n'), pages: 1 }
   if (!menu) return { text: [title, '', 'Loading...', '', 'Tap: back'].join('\n'), pages: 1 }
   const blocks = pageBlocks(page, menu, now)
   const single = MAX_LINES - 4 // title, gap, the lines, gap, footer

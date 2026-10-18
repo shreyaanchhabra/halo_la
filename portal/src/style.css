@@ -83,6 +83,7 @@ button.secondary { background: var(--card); color: var(--accent); }
 .name-guest { margin-top: 0.75rem; }
 #pv-saved audio { display: block; margin-top: 0.5rem; }
 .status { color: var(--muted); font-size: 0.9rem; }
+.status.ok { color: #1f4d30; }
 .status.error { color: #a12a2a; }
 details { font-size: 0.9rem; color: var(--muted); }
 summary { cursor: pointer; }

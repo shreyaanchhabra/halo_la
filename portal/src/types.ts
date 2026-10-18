@@ -55,7 +55,7 @@ export type HaloData = {
   stock?: Record<string, Stock>
 }
 
-export type DoseSource = 'imessage' | 'glasses'
+export type DoseSource = 'imessage' | 'glasses' | 'patient' | 'family'
 
 export type DoseLog = { medKey: string; slot: string; at: string; by?: DoseSource } // slot: "YYYY-MM-DD HH:MM"
 
@@ -78,7 +78,7 @@ export type TranscriptLine = { text: string; at: string; id?: string; speaker?: 
 // Plans HALO picks up from conversation (see shared/calendar.ts)
 export type { GlassesState, Plan, PlanStatus } from '../../shared/calendar.ts'
 
-export type TextAlertKind = 'missed' | 'refill' | 'prices'
+export type TextAlertKind = 'missed' | 'taken' | 'dose_update' | 'refill' | 'prices' | 'appointment' | 'checkin'
 
 export type TextMessage = {
   at: string
@@ -106,7 +106,15 @@ export type GlassesView = {
 // The glasses menu: appointments over the next few days, today's medicines, and the family
 export type GlassesMenu = {
   appointments: { title: string; date: string; time: string | null }[]
-  medicines: { title: string; times: string[]; takenToday: number; daysLeft: number | null; low: boolean }[]
+  medicines: {
+    title: string
+    times: string[]
+    takenToday: number
+    doseStatuses: { time: string; taken: boolean }[]
+    pillsLeft: number | null
+    daysLeft: number | null
+    low: boolean
+  }[]
   family: { name: string; relation: string }[]
 }
 

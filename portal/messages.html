@@ -8,13 +8,18 @@
     <nav>
       <a href="/">Setup</a>
       <a href="/calendar.html">Calendar</a>
+      <a href="/patient.html" target="_blank">Patient page ↗</a>
     </nav>
   </header>
   <main>
     <p id="status" role="status" aria-live="polite" hidden></p>
     <section class="card">
-      <h2>Approved contacts</h2>
-      <p class="hint">Only approved numbers reach the glasses. Voice enrollment alone does not approve messages.</p>
+      <h2>Photon connection</h2>
+      <p id="provider-status" class="status" role="status" aria-live="polite">Checking Photon…</p>
+    </section>
+    <section class="card">
+      <h2>Family connections</h2>
+      <p class="hint">Only explicitly approved numbers can send messages to the glasses or receive care texts. Voice enrollment does not grant messaging permission. After approval, ask each contact to text HALO once to connect. HALO also answers caregiver questions and action requests over iMessage.</p>
       <form id="contact-form">
         <div class="row"><label>Name<input name="name" required maxlength="60" placeholder="Maya"></label><label>Relationship<input name="relation" required maxlength="60" placeholder="Granddaughter"></label></div>
         <label>International phone number<input name="phone" type="tel" required placeholder="+1 202 555 0101"></label>
@@ -24,6 +29,7 @@
       <ul id="contacts" class="list"></ul>
     </section>
     <section class="card"><h2>Family inbox</h2><p class="hint">Withheld messages are visible here only. Approving a contact does not release old withheld texts.</p><ul id="inbox" class="list"></ul></section>
+    <section class="card"><h2>HALO replies and care texts</h2><ul id="outgoing" class="list"></ul></section>
     <section class="card"><h2>Replies</h2><ul id="replies" class="list"></ul></section>
     <section class="card"><h2>Activity</h2><ul id="activity" class="list"></ul></section>
   </main>

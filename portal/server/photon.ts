@@ -3,11 +3,15 @@ import { createHash } from 'node:crypto'
 import { Photon } from '@photon-ai/api'
 import { allMedicines, daysLeft, pillsLeft, refillDue, type MedEntry } from '../src/meds'
 import { appointments, formatTime, scheduleFor, ymd } from '../src/schedule'
-import type { DoseLog, DoseSource, GlassesMessage, HaloData, ImessageStatus, Medicine, PriceCheck, TextAlertKind, TextMessage, VoiceGuest } from '../src/types'
+import type { DoseLog, DoseSource, GlassesMessage, HaloData, ImessageStatus, Medicine, Plan, PriceCheck, TextAlertKind, TextMessage, VoiceGuest } from '../src/types'
 import { answerCaregiver, type CaregiverAction } from './ai'
 import type { Glasses } from './glasses'
 import { RefillError, type Refills } from './refills.ts'
 import { formatCents } from '../../shared/refill-types.ts'
+import type { MessageReply } from '../../shared/messages.ts'
+import { isApprovedMessageContact, receivePhotonMessage } from './message-routes.ts'
+import { careSummaryText, doseUpdateText } from './proactive.ts'
+import { isCareSummaryRequest, shouldAnswerCaregiver } from './photon-text.ts'
 import type { Voices } from './voices'
 import { traceTask } from './sentry'
 
@@ -61,6 +65,10 @@ export type ImessageDeps = {
   glasses: Glasses
   refills: Refills // GoodRx refills the family approves here or in the portal
   voices?: Pick<Voices, 'guests' | 'nameGuest'>
+  readPlans?: () => Plan[]
+  receiveMessage?: typeof receivePhotonMessage
+  recordOutgoing?: (input: { providerId: string; to: string; text: string; kind: 'halo' | 'care' }) => unknown
+  isApprovedContact?: typeof isApprovedMessageContact
   notify: () => void
 }
 
@@ -125,13 +133,56 @@ export function createImessage(deps: ImessageDeps) {
 
   // Shared iMessage lines reject threaded replies, so every text is a plain message in the Space
   async function send(c: Caregiver, text: string, key: string, extra?: Pick<TextMessage, 'alert' | 'glassesId'>) {
-    await photon.projects.sendMessage({
+    if (deps.isApprovedContact && !deps.isApprovedContact(c.handle)) throw new Error('This iMessage contact is not approved in the family portal.')
+    const result = await photon.projects.sendMessage({
       path: { id: deps.projectId },
       headers: { 'idempotency-key': idempotencyKey(key, c.handle) },
       body: { spaceId: c.spaceId, senderId: c.agentId, content: { type: 'text', format: 'plain', text } },
     })
+    const messageId = result.id
+    if (typeof messageId !== 'string' || !messageId) throw new Error('Photon accepted the reply without returning a message ID.')
     sendError = undefined
+    if (!key.startsWith('family-message-reply:')) {
+      deps.recordOutgoing?.({ providerId: messageId, to: c.handle, text, kind: extra?.alert ? 'care' : 'halo' })
+    }
     logMessage({ at: new Date().toISOString(), direction: 'out', handle: c.handle, text, ...extra })
+    return messageId
+  }
+
+  async function doseUpdated(medKey: string, slot: string, taken: boolean, actionId: string) {
+    const data = deps.readData()
+    const medicine = allMedicines(data).find(e => e.key === medKey)
+    if (!medicine) throw new Error(`Cannot notify family: medicine ${medKey} was not found.`)
+    const recipients = state.caregivers.filter(c => !c.paused && (deps.isApprovedContact?.(c.handle) ?? true))
+    const text = doseUpdateText(data.patient.name, medName(medicine), slot, taken)
+    const errors: unknown[] = []
+    for (const c of recipients) {
+      const key = `dose-update:${medKey}|${slot}|${actionId}:${c.handle}`
+      if (state.alerts[key]) continue
+      try {
+        await traceTask('Send a dose update', 'imessage.dose', () => send(c, text, key, { alert: 'dose_update' }))
+        state.alerts[key] = { at: new Date().toISOString(), kind: 'dose_update', medKey }
+        saveState()
+      } catch (err) {
+        sendError = `Couldn't send a dose update: ${err instanceof Error ? err.message : String(err)}`
+        deps.notify()
+        errors.push(err)
+      }
+    }
+    if (errors.length) {
+      const failures = `${errors.length} failed ${errors.length === 1 ? 'delivery' : 'deliveries'}`
+      sendError = `Couldn't notify every family member about the taken dose (${failures}).`
+      deps.notify()
+      throw new AggregateError(errors, 'Could not notify every family member about the dose update.')
+    }
+  }
+
+  async function sendReviewedReply(reply: MessageReply): Promise<string> {
+    const digits = reply.to.replace(/\D/g, '')
+    const normalized = `+${digits}`
+    const c = state.caregivers.find(x => x.handle.replace(/\D/g, '') === digits)
+    if (!c || !deps.isApprovedContact?.(normalized)) throw new Error('This approved contact must text HALO once before a reply can be delivered.')
+    return send(c, reply.text, `family-message-reply:${reply.id}`)
   }
 
   const typing = (c: Caregiver, on: boolean) =>
@@ -265,7 +316,7 @@ export function createImessage(deps: ImessageDeps) {
     const name = (deps.readData().patient.name || 'the patient').split(' ')[0]
     const text = `Someone new has been talking with ${name} since ${clock(g.firstHeard)}. `
       + `If you know who it is, reply with their name and how they know ${name}, like "That's Raj, a neighbor", and I'll recognize them from now on.`
-    const listening = state.caregivers.filter(c => !c.paused)
+    const listening = state.caregivers.filter(c => !c.paused && (deps.isApprovedContact?.(c.handle) ?? true))
     if (!listening.length) return
     void traceTask('Ask the family about a new voice', 'imessage.guest', () =>
       Promise.all(listening.map(c => send(c, text, `guest:${g.id}`).catch(failed))))
@@ -280,8 +331,8 @@ export function createImessage(deps: ImessageDeps) {
       deps.notify()
       return {
         text: c.paused
-          ? "Okay, I've paused alert texts. Text \"resume alerts\" to turn them back on."
-          : `Alerts are back on. I'll text you if ${name} misses a dose or a refill comes due.`,
+          ? "Okay, I've paused care updates. Text \"resume alerts\" to turn them back on."
+          : `Care updates are back on. I'll text you if ${name} misses a dose, when a dose changes, or when refill and price updates are ready.`,
       }
     }
     if (action.type === 'mark_taken') return { text: markTaken(c, data, action.medKey, action.time) }
@@ -322,7 +373,7 @@ export function createImessage(deps: ImessageDeps) {
   // Tells the caregiver who sent a glasses message that the patient saw it
   async function glassesSeen(m: GlassesMessage) {
     const c = state.caregivers.find(x => x.handle === m.handle)
-    if (!c || !m.seenAt) return
+    if (!c || !m.seenAt || (deps.isApprovedContact && !deps.isApprovedContact(c.handle))) return
     const name = (deps.readData().patient.name || 'The patient').split(' ')[0]
     await traceTask('Text that a message was seen', 'imessage.seen', () =>
       send(c, `${name} saw your message on the glasses at ${clock(m.seenAt!)}.`, `seen:${m.id}`).catch(failed))
@@ -332,6 +383,11 @@ export function createImessage(deps: ImessageDeps) {
     const text = m.content.text?.trim() ?? ''
     const handle = m.sentBy.handle ?? ''
     if (!text || !handle || !m.receivedBy) return
+
+    const approved = deps.receiveMessage
+      ? deps.receiveMessage({ providerId: m.id, from: handle, text, receivedAt: m.createdAt }).allowedOnArrival
+      : true
+    if (!approved) return
 
     logMessage({ at: m.createdAt, direction: 'in', handle, text })
     let c = state.caregivers.find(x => x.handle === handle)
@@ -348,9 +404,15 @@ export function createImessage(deps: ImessageDeps) {
 
     const name = (deps.readData().patient.name || 'your family member').split(' ')[0]
     if (isNew) {
-      await send(c, `Hi, I'm HALO, ${name}'s care assistant. I'll text you here if a dose is missed or a refill is due. `
-        + 'Ask me anything about meds, doses, or appointments.', `welcome:${m.id}`)
+      await send(c, `Hi, I'm HALO, ${name}'s care assistant. I'll text you when a dose is marked taken or undone, or if one is missed. `
+        + 'Text "summary" anytime for a medication and appointment update, or ask me about care.', `welcome:${m.id}`)
       if (isGreeting(text)) return
+    }
+
+    if (isCareSummaryRequest(text)) {
+      const summary = careSummaryText(deps.readData(), deps.readDoses(), deps.readPlans?.() ?? [], new Date())
+      await send(c, summary, `reply:${m.id}`)
+      return
     }
 
     // Refill texts say "Reply approve", so a bare approve goes to the one waiting refill
@@ -362,6 +424,7 @@ export function createImessage(deps: ImessageDeps) {
       }
     }
 
+    if (!shouldAnswerCaregiver(text)) return
     if (!deps.groqKey) {
       await send(c, "I can't answer questions right now. Check the HALO portal for the latest.", `reply:${m.id}`)
       return
@@ -417,7 +480,7 @@ export function createImessage(deps: ImessageDeps) {
   // ---- Texts HALO sends on its own ----
 
   async function checkAlerts() {
-    const listening = state.caregivers.filter(c => !c.paused)
+    const listening = state.caregivers.filter(c => !c.paused && (deps.isApprovedContact?.(c.handle) ?? true))
     if (!listening.length) return
     const data = deps.readData()
     const doses = deps.readDoses()
@@ -440,13 +503,13 @@ export function createImessage(deps: ImessageDeps) {
       const [d] = missed
       due.push({
         keys: [d.key], kind: 'missed', medKeys: [d.medKey],
-        text: `${name} hasn't marked the ${d.label} as taken yet. It was due ${Math.round(d.late)} minutes ago.`,
+        text: `A gentle heads-up: HALO hasn't seen ${name}'s ${d.label} marked as taken yet. It was due ${Math.round(d.late)} minutes ago. Hope everything is okay.`,
       })
     } else if (missed.length > 1) {
       const labels = missed.map(d => d.label)
       due.push({
         keys: missed.map(d => d.key), kind: 'missed', medKeys: missed.map(d => d.medKey),
-        text: `${name} hasn't marked these doses as taken yet: ${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}.`,
+        text: `A gentle heads-up: HALO hasn't seen ${name}'s ${labels.slice(0, -1).join(', ')} and ${labels.at(-1)} marked as taken yet.`,
       })
     }
 
@@ -457,8 +520,8 @@ export function createImessage(deps: ImessageDeps) {
         const others = waiting.quote.prices.length - 1
         due.push({
           keys: [`refill:${waiting.id}:${waiting.quote.expiresAt}`], kind: 'refill', medKeys: [e.key],
-          text: `${medName(e)} is running low, about ${daysLeft(e, data, doses)} days left. Cheapest on GoodRx: ${formatCents(waiting.quote.priceCents)} at ${waiting.quote.pharmacy}`
-            + `${others > 0 ? ` (${others} more pharmacies in the portal)` : ''}. I won't buy anything. Reply "approve" and I'll put a pickup reminder on the calendar.`,
+          text: `A friendly refill heads-up: ${medName(e)} is running low, with about ${daysLeft(e, data, doses)} days left. GoodRx found ${formatCents(waiting.quote.priceCents)} at ${waiting.quote.pharmacy}`
+            + `${others > 0 ? ` (${others} more options are in the portal)` : ''}. Nothing will be bought automatically; reply "approve" to add a pickup reminder.`,
         })
       }
       const p = prices[e.key]
@@ -468,8 +531,8 @@ export function createImessage(deps: ImessageDeps) {
         due.push({
           keys: [`prices:${e.key}:${p.checkedAt}`], kind: 'prices', medKeys: [e.key],
           text: top.length
-            ? `GoodRx prices for ${medName(e)} near ${p.zip}: ${top.map(q => `${q.pharmacy} ${money(q.price)}`).join(', ')}.`
-            : `GoodRx didn't list prices for ${medName(e)} near ${p.zip}.${p.note ? ` ${p.note}` : ''}`,
+            ? `Good news: the GoodRx check for ${medName(e)} near ${p.zip} is ready. ${top.map(q => `${q.pharmacy} ${money(q.price)}`).join(', ')}.`
+            : `The GoodRx check for ${medName(e)} near ${p.zip} is ready, but no prices were listed.${p.note ? ` ${p.note}` : ''}`,
         })
       }
     }
@@ -482,6 +545,7 @@ export function createImessage(deps: ImessageDeps) {
         for (const c of listening) await send(c, alert.text, `alert:${alert.keys.join(',')}`, { alert: alert.kind }).catch(failed)
       })
     }
+
   }
 
   function loop(fn: () => Promise<void>, every: number) {
@@ -515,6 +579,11 @@ export function createImessage(deps: ImessageDeps) {
     checkAlerts: () => checkAlerts().catch(setError),
     glassesSeen: (m: GlassesMessage) => glassesSeen(m).catch(() => {}),
     askAboutGuest,
+    doseUpdated,
+    sendReviewedReply,
+    connectedPhones: () => state.caregivers
+      .filter(c => deps.isApprovedContact?.(c.handle) ?? true)
+      .map(c => c.handle),
     status(): ImessageStatus {
       const alerts: ImessageStatus['alerts'] = {}
       for (const a of Object.values(state.alerts)) {

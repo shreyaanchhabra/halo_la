@@ -1,4 +1,4 @@
-import { allMedicines, daysLeft, refillDue } from '../src/meds.ts'
+import { allMedicines, daysLeft, pillsLeft, refillDue } from '../src/meds.ts'
 import { appointments, ymd } from '../src/schedule.ts'
 import type { DoseLog, GlassesMenu, HaloData, Plan } from '../src/types'
 
@@ -17,6 +17,11 @@ export function glassesMenu(data: HaloData, doses: DoseLog[], plans: Plan[], now
       title: `${e.med.name} ${e.med.strength}`.trim(),
       times: e.med.times,
       takenToday: doses.filter(d => d.medKey === e.key && d.slot.startsWith(`${today} `)).length,
+      doseStatuses: e.med.times.map(time => ({
+        time,
+        taken: doses.some(d => d.medKey === e.key && d.slot === `${today} ${time}`),
+      })),
+      pillsLeft: pillsLeft(e, data, doses),
       daysLeft: daysLeft(e, data, doses),
       low: refillDue(e, data, doses),
     })),

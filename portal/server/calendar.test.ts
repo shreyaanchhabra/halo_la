@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { test, describe, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseAnswer } from './yesno.ts'
+import { parseAnswer, parseDoseAnswer } from './yesno.ts'
 import { findWhen } from './when.ts'
 import { createCalendar, type Care } from './calendar.ts'
 
@@ -28,6 +28,14 @@ describe('yes / no', () => {
   for (const t of yes) test(`"${t}" is yes`, () => assert.equal(parseAnswer(t), 'yes'))
   for (const t of no) test(`"${t}" is no`, () => assert.equal(parseAnswer(t), 'no'))
   for (const t of neither) test(`"${t}" is neither`, () => assert.equal(parseAnswer(t), null))
+})
+
+describe('medication taken / not taken answers', () => {
+  const yes = ['taken', 'Taken it', 'I took it', 'I have taken it', 'already took it']
+  const no = ['not taken', 'not taken it', "I didn't take it", "I haven't taken it", 'I have not taken it']
+  for (const text of yes) test(`"${text}" marks a dose taken`, () => assert.equal(parseDoseAnswer(text), 'yes'))
+  for (const text of no) test(`"${text}" leaves a dose not taken`, () => assert.equal(parseDoseAnswer(text), 'no'))
+  test('ordinary conversation is not a dose answer', () => assert.equal(parseDoseAnswer('I think I took it yesterday after dinner'), null))
 })
 
 describe('date and time finder', () => {

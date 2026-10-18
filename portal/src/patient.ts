@@ -25,7 +25,7 @@ function doseControl(i: ScheduleItem) {
   const at = takenAt(i)
   return at
     ? `<span class="taken">✓ Taken ${clockTime(at)} <button class="undo" data-undo="${esc(i.medKey!)}|${esc(i.slot!)}">Undo</button></span>`
-    : `<button class="took" data-took="${esc(i.medKey!)}|${esc(i.slot!)}">I took it</button>`
+    : `<span class="not-taken">Not taken</span><button class="took" data-took="${esc(i.medKey!)}|${esc(i.slot!)}">Mark taken</button>`
 }
 let plans: Plan[] = []
 let refills: RefillState | null = null
@@ -208,7 +208,7 @@ document.addEventListener('click', async e => {
   if (!target) return
   const [medKey, slot] = target.split('|')
   ;(e.target as HTMLButtonElement).disabled = true
-  await setDose(medKey, slot, Boolean(took))
+  await setDose(medKey, slot, Boolean(took), 'patient')
   doses = await loadDoses()
   renderSchedule()
 })

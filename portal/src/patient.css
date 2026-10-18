@@ -196,6 +196,7 @@ button.undo {
   color: inherit; text-decoration: underline; cursor: pointer; opacity: 0.8;
 }
 .schedule .done .taken { opacity: 1; }
+.not-taken { display: block; margin-top: 6px; font-size: 0.95rem; font-weight: 700; color: var(--muted); }
 .schedule li > span:last-child { display: grid; justify-items: start; }
 
 /* ---- the question card (add this plan?) ---- */

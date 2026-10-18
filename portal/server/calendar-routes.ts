@@ -5,6 +5,9 @@ import { createCalendar, type Care, type Outcome } from './calendar.ts'
 import { transcribeWav } from './groq.ts'
 import { buildIcs } from '../src/schedule.ts'
 import { planTitle, whenLabel } from '../../shared/format.ts'
+import { parseDoseAnswer } from './yesno.ts'
+
+const DOSE_STT_PROMPT = 'Medication dose check. Transcribe the spoken answer exactly. Likely answers are: taken, not taken, I took it, I did not take it, yes, or no. Do not turn "not taken" into "taken".'
 
 // The calendar's endpoints, for the portal's dev server (see vite.config.ts). They sit next to the
 // /api/data, /api/upload and /api/transcripts routes there and follow the same conventions.
@@ -36,6 +39,7 @@ export type RoutesOptions = {
   dataDir: string
   notify?: () => void
   answerWindowMs?: number
+  transcribe?: typeof transcribeWav
   // Starts working out who is speaking while the clip is transcribed; the returned function
   // decides once we know the clip had words in it
   identify?: (wav: Buffer) => () => SpeakerMatch
@@ -48,6 +52,7 @@ export function calendarRoutes(o: RoutesOptions) {
   const readHalo = () => { try { return JSON.parse(fs.readFileSync(haloFile, 'utf8')) } catch { return {} } }
   const care = (): Care => { const d = readHalo(); return { patient: d.patient?.name ?? '', people: d.people ?? [] } }
   const needKey = () => { if (!o.apiKey) throw new Error('GROQ_API_KEY is missing. Add it to portal/.env and restart the portal.') }
+  const transcribe = o.transcribe ?? transcribeWav
 
   const cal = createCalendar({ apiKey: o.apiKey, dataDir: o.dataDir, care, notify: o.notify, answerWindowMs: o.answerWindowMs })
   // Questions the patient doesn't answer move to the family on their own, so check every second
@@ -81,13 +86,21 @@ export function calendarRoutes(o: RoutesOptions) {
       return true
     }
 
+    // A medication prompt accepts only a short yes/no answer, never calendar conversation.
+    if (route === 'POST /api/audio/dose') {
+      needKey()
+      const text = await transcribe(await readBody(req), o.apiKey, { prompt: DOSE_STT_PROMPT })
+      json(res, { kind: text ? 'dose-answer' : 'silence', text, answer: parseDoseAnswer(text) })
+      return true
+    }
+
     // Speech from the glasses: one finished utterance as a 16 kHz mono WAV
     if (route === 'POST /api/audio') {
       needKey()
       const c = care()
       const wav = await readBody(req)
       const names = [...c.people.flatMap(p => [p.name, p.name.split(' ')[0]]), c.patient, c.patient.split(' ')[0]]
-      const transcribing = transcribeWav(wav, o.apiKey, { vocabulary: names })
+      const transcribing = transcribe(wav, o.apiKey, { vocabulary: names })
       let speakerOf: (() => SpeakerMatch) | undefined
       try { speakerOf = o.identify?.(wav) } catch (err) { console.error('[voices] could not read the clip:', String(err)) }
       const match = speakerOf?.() ?? { speaker: String(req.headers['x-speaker'] ?? 'unknown') }

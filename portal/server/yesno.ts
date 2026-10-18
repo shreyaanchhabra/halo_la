@@ -19,3 +19,13 @@ export function parseAnswer(text: string): Answer {
   if (words.some(w => YES.has(w))) return 'yes'
   return null
 }
+
+export function parseDoseAnswer(text: string): Answer {
+  const clean = text.toLowerCase().replace(/[’']/g, '').replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!clean || clean.split(' ').length > MAX_WORDS) return null
+  if (/\b(?:not (?:taken|take)|never (?:taken|take)|didnt take|havent taken|have not taken|did not take|dont take|do not take)\b/.test(clean)) return 'no'
+  if (/^(?:yes )?(?:i )?(?:(?:have|already) )?taken(?: it)?$/.test(clean)
+    || /^(?:yes )?(?:i )?(?:already )?took(?: it)?$/.test(clean)
+    || /^(?:yes )?take it$/.test(clean)) return 'yes'
+  return parseAnswer(clean)
+}

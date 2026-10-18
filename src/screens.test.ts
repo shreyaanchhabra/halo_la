@@ -157,12 +157,19 @@ describe('family messages and doses', () => {
     assert.match(s, /Tap: got it/)
   })
 
-  test('a due dose shows the medicine and its time', () => {
+  test('a due dose asks for a spoken yes or no and shows the medicine and time', () => {
     const s = buildScreen({ ...base, state: state(), care: dose })
-    assert.match(s, /Time for your medicine/)
+    assert.match(s, /Did you take this medicine\?/)
     assert.match(s, /Donepezil 5 mg/)
     assert.match(s, /Due at 9 PM/)
-    assert.match(s, /Tap: I took it/)
+    assert.match(s, /Say taken or not taken/)
+    assert.ok(s.split('\n').every(line => line.length <= 34))
+  })
+
+  test('a dose confirmation is visible while the medications page is open', () => {
+    const s = detailScreen('medications', null, now, 0, 'Donepezil 5 mg marked taken.')
+    assert.match(s.text, /Medication update/)
+    assert.match(s.text, /Donepezil 5 mg marked taken\./)
   })
 
   test('a spoken question or reminder comes first', () => {
@@ -213,8 +220,16 @@ describe('the menu', () => {
       { title: 'Blood test', date: '2026-10-27', time: null },
     ],
     medicines: [
-      { title: 'Donepezil 5 mg', times: ['08:00', '20:00'], takenToday: 1, daysLeft: 29, low: false },
-      { title: 'Memantine 10 mg', times: ['09:00'], takenToday: 0, daysLeft: 5, low: true },
+      {
+        title: 'Donepezil 5 mg', times: ['08:00', '20:00'], takenToday: 1,
+        doseStatuses: [{ time: '08:00', taken: true }, { time: '20:00', taken: false }],
+        pillsLeft: 58, daysLeft: 29, low: false,
+      },
+      {
+        title: 'Memantine 10 mg', times: ['09:00'], takenToday: 0,
+        doseStatuses: [{ time: '09:00', taken: false }],
+        pillsLeft: 5, daysLeft: 5, low: true,
+      },
     ],
     family: [{ name: 'Maya', relation: 'Daughter' }, { name: 'Raj', relation: '' }],
   }
@@ -249,8 +264,23 @@ describe('the menu', () => {
   test('medications show their times, today\'s doses, and which are running low', () => {
     assert.match(detailScreen('medications', menu, now, 0).text, /^Medications\n\n1 is running low\n/)
     const s = allPages('medications')
-    assert.match(s, /Donepezil 5 mg\n8 AM, 8 PM {2}\(1 of 2 taken\)/)
-    assert.match(s, /Memantine 10 mg\n9 AM {2}\(0 of 1 taken\)\n! Running low: 5 days left/)
+    assert.match(s, /Donepezil 5 mg\n8 AM: Taken\n8 PM: Not taken\n58 pills left/)
+    assert.match(s, /Memantine 10 mg\n9 AM: Not taken\n5 pills left\n! Running low: 5 days left/)
+  })
+
+  test('the medications category stays on its medication content without listening prompts', () => {
+    const screen = allPages('medications')
+    assert.match(screen, /Donepezil 5 mg/)
+    assert.match(screen, /Not taken/)
+    assert.doesNotMatch(screen, /Did you take this medicine|Say taken or not taken/)
+  })
+
+  test('medicines without a pill count explain that the count is not set', () => {
+    const unknownCount: GlassesMenu = {
+      ...menu,
+      medicines: [{ title: 'Unknown pill', times: [], takenToday: 0, doseStatuses: [], pillsLeft: null, daysLeft: null, low: false }],
+    }
+    assert.match(detailScreen('medications', unknownCount, now, 0).text, /Pill count not set/)
   })
 
   test('family members with how they are related', () => {

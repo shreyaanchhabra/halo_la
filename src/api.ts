@@ -24,11 +24,15 @@ const post = (path: string, body: object) =>
 
 export const markSeen = (id: string) => post('/api/glasses/seen', { id })
 export const markTaken = (medKey: string, slot: string) => post('/api/doses', { medKey, slot, taken: true, by: 'glasses' })
+export const markNotTaken = (medKey: string, slot: string) => post('/api/doses', { medKey, slot, taken: false, by: 'glasses' })
 
 export type AudioReply = { kind: string; text: string; answer?: string; summary?: string; error?: string }
 
 export const postAudio = (wav: Uint8Array) =>
   json<AudioReply>('/api/audio', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } }, 25_000)
+
+export const postDoseAnswer = (wav: Uint8Array) =>
+  json<AudioReply>('/api/audio/dose', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } }, 25_000)
 
 export const postWho = (wav: Uint8Array) =>
   json<AudioReply>('/api/audio/who', { method: 'POST', body: wav as BodyInit, headers: { 'Content-Type': 'audio/wav' } }, 4_000)

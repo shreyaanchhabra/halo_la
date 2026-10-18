@@ -1,6 +1,10 @@
 export type Press = 'click' | 'double'
 export type PressAction = 'home' | 'toggle-pause' | 'tap'
 
+export function canListenForConversation(at: { onToday: boolean; paused: boolean }): boolean {
+  return at.onToday && !at.paused
+}
+
 // On a menu page every press means "back". At home a double press pauses or resumes listening.
 // A press while paused resumes — it must not shut the page down, or the glasses go black.
 export function pressAction(press: Press, at: { onPage: boolean; paused: boolean }): PressAction {
