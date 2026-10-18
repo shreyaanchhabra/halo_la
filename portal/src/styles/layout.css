@@ -1,9 +1,0 @@
-main { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; display: grid; gap: 20px; }
-
-.card { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; padding: 20px; display: grid; gap: 14px; }
-h2 { margin: 0; font-size: 1.15rem; }
-.hint { margin: 0; color: var(--muted); font-size: 0.9rem; }
-a { color: var(--accent); }
-h1 { margin: 0; font: 650 1.5rem/1.3 system-ui, -apple-system, sans-serif; }
-.page-intro { display: grid; gap: 6px; }
-.card { min-width: 0; }

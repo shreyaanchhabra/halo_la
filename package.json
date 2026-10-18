@@ -4,30 +4,30 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start:all": "node scripts/dev.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "sim": "evenhub-simulator http://localhost:5175",
-    "bridge": "node scripts/imessage-bridge.mjs",
-    "qr": "evenhub qr --clear && evenhub qr --http --ip $(ipconfig getifaddr en0) --port 5173",
+    "qr": "evenhub qr --clear && evenhub qr --http --ip $(ipconfig getifaddr en0) --port 5175",
     "pack": "npm run build && evenhub pack app.json dist",
     "portal": "vite portal",
-    "server": "node --watch server/index.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p server",
-    "test": "node --test \"server/**/*.test.ts\" \"src/**/*.test.ts\""
+    "test": "node --test \"portal/server/**/*.test.ts\" \"portal/src/**/*.test.ts\" \"shared/**/*.test.ts\" \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p portal && tsc --noEmit -p portal/server"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.14",
     "@evenrealities/evenhub-simulator": "^0.9.5",
     "@types/node": "^26.6.5",
     "typescript": "~5.9",
+    "unpdf": "^1.9.0",
     "vite": "^8.3.0"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.16",
-    "@photon-ai/imessage-kit": "^3.0.0",
-    "better-sqlite3": "^13.0.3",
+    "@photon-ai/api": "^0.5.0",
+    "@sentry/browser": "^11.8.0",
+    "@sentry/node": "^11.8.0",
+    "browser-use-sdk": "^3.12.1",
     "chrono-node": "^2.10.3"
   }
 }

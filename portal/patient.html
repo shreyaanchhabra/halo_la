@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HALO</title>
+  </head>
+  <body class="patient">
+    <header class="topbar">
+      <p class="brand"><span class="brand-mark" aria-hidden="true"></span>HALO</p>
+      <p class="brand-sub">Your day, remembered for you</p>
+    </header>
+
+    <header class="hello">
+      <div>
+        <h1 id="greeting">Hello</h1>
+        <p id="today-date"></p>
+      </div>
+      <p id="clock" class="clock"></p>
+    </header>
+
+    <main class="patient-grid">
+      <section class="panel ask wide" id="ask" aria-live="assertive" hidden></section>
+
+      <section class="panel low wide" id="low" aria-live="polite" hidden></section>
+
+      <section class="panel next" id="next-up" aria-live="polite"></section>
+
+      <section class="panel listen">
+        <div class="listen-head">
+          <h2>Listening</h2>
+          <button type="button" id="listen-btn">Start listening</button>
+        </div>
+        <p id="live-caption" class="caption">Press "Start listening" and HALO will write down what is said.</p>
+        <ul id="heard" class="heard"></ul>
+      </section>
+
+      <section class="panel wide" id="calendar" aria-label="Calendar"></section>
+
+      <section class="panel">
+        <h2>Today</h2>
+        <ul id="today" class="schedule"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Coming up</h2>
+        <ul id="upcoming" class="schedule"></ul>
+      </section>
+
+      <section class="panel wide">
+        <h2>People who visit you</h2>
+        <ul id="people" class="people"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Your medicines</h2>
+        <ul id="medicines" class="meds"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>From your doctor</h2>
+        <ul id="doctor-notes" class="notes"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/src/patient.ts"></script>
+  </body>
+</html>

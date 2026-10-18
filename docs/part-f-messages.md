@@ -4,9 +4,9 @@ Implemented in the existing HALO TypeScript server, G2 app and family portal.
 
 ## Try it
 
-From the repository, run `npm run start:all`. This starts the backend, care portal and glasses app together, reuses healthy services, and restarts a managed service if it exits. Keep that launcher running. In Turnstone, the managed development server keeps it running beyond a chat turn. Restart the launcher after changing backend code.
+From the repository, run `npm run portal` (care portal and backend, port 5176) and `npm run dev` (glasses app, port 5175). Restart the portal after changing backend code.
 
-Open http://localhost:5174/messages.html for the complete browser demo. The glasses app is at http://localhost:5175/ and needs the Even App or simulator; a regular browser alone does not supply the G2 bridge. Port 5173 is left free for other projects.
+Open http://localhost:5176/messages.html for the family messages page. The glasses app is at http://localhost:5175/ and needs the Even App or simulator; a regular browser alone does not supply the G2 bridge.
 
 1. Add Maya, granddaughter, with the synthetic number `+12025550101`, and approve her.
 2. Simulate “Running 10 min late!” from that number. The glasses show her name, relationship and text.
@@ -27,7 +27,7 @@ Tap turns message pages; the final tap dismisses an incoming message. Double-tap
 - Repeated provider IDs are deduplicated. Reusing an ID with a different body/sender is rejected.
 - Message/reply bodies are paginated into five-line screens. The wearer sees every page before the final send control. Drafts expire after two minutes. The server requires explicit confirmation and the exact reviewed text, rechecks approval, and locks a send before calling the adapter.
 - Ambiguous delivery is marked **unknown**, never automatically retried. The original message is dismissed to prevent an accidental second reply. Family should check the provider before attempting any new send.
-- Data and source-linked activity are persisted in `server/data/messages.json`, or the file named by `HALO_MESSAGES_FILE`. This is the project's existing single-process demo architecture.
+- Data and source-linked activity are persisted in `portal/data/family-messages.json`, or the file named by `HALO_MESSAGES_FILE`. This is the project's existing single-process demo architecture.
 
 ## Live messaging adapter
 
@@ -41,6 +41,6 @@ The family endpoints and demo injection follow the existing unauthenticated hack
 
 ## Verification
 
-`node --test server/messages.test.ts server/message-routes.test.ts src/message-screen.test.ts` checks approved versus unknown senders, revocation, webhook authorization and duplicates, expiry, exact confirmation, cancellation, send concurrency, unknown delivery, demo isolation and complete message pagination. HTTP tests require localhost access. Voice input also requires the existing Groq configuration and a microphone; physical ring/temple behavior needs a G2 hardware test.
+`node --test portal/server/messages.test.ts portal/server/message-routes.test.ts src/message-screen.test.ts` checks approved versus unknown senders, revocation, webhook authorization and duplicates, expiry, exact confirmation, cancellation, send concurrency, unknown delivery, demo isolation and complete message pagination. HTTP tests require localhost access. Voice input also requires the existing Groq configuration and a microphone; physical ring/temple behavior needs a G2 hardware test.
 
 All 13 Flow F tests passed. Glasses and multi-page portal production builds passed, as did TypeScript checks for the app, server and portal. A broader test-suite run passed 134 of 135 tests; the calendar test for “Let's have dinner together tomorrow at 6” received `offer` from the live model where its assertion expected `proposed`. No calendar logic was changed for Flow F.

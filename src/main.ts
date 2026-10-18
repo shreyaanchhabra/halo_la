@@ -7,11 +7,11 @@ import {
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 import type { GlassesState, Plan } from '../shared/calendar.ts'
-import { API, getState, postAudio, postStats } from './api.ts'
+import { API, getCare, getState, markSeen, markTaken, postAudio, postStats } from './api.ts'
 import { AudioPipeline } from './audio/pipeline.ts'
 import type { SegmenterOptions } from './audio/segmenter.ts'
-import { buildScreen, type Mic } from './screens.ts'
 import { GlassesMessaging } from './messaging.ts'
+import { buildScreen, type CareCard, type Mic } from './screens.ts'
 
 // ?debug shows mic levels on the display and exposes test hooks on window.
 // ?minRms=80&startRatio=2.5 (and the other segmenter options) tune the cutter without a rebuild.
@@ -53,6 +53,11 @@ let lastAudioAt = Date.now()
 let lastMicRestart = 0
 let notice: string | null = null
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
+let care: CareCard | null = null
+// A card just tapped stays hidden until the server catches up
+const tapped = new Set<string>()
+
+// Approved-contact messages and voice replies. Calendar questions, reminders and care cards come first.
 const messaging = new GlassesMessaging(refresh)
 let replyPipeline: AudioPipeline | null = null
 let startingReply = false
@@ -70,13 +75,12 @@ let wanted = ''
 let drawing = false
 
 function screen(): string {
-  // Calendar confirmations and reminders retain priority. Hidden message UI cannot capture input.
-  const canShow = !userPaused && state && online && !state.prompt && !state.resolved && !reminder
+  const canShow = !userPaused && state && online && !state.prompt && !state.resolved && !reminder && !care
   const message = canShow ? messaging.screen() : null
   if (message) { messaging.visible = true; return message }
   messaging.suspend()
   replyPipeline = null
-  return buildScreen({ now: nowDate(), state, online, mic: userPaused ? 'paused' : mic, reminder, notice, debug: DEBUG ? lastDebug : undefined })
+  return buildScreen({ now: nowDate(), state, online, mic: userPaused ? 'paused' : mic, reminder, notice, care, debug: DEBUG ? lastDebug : undefined })
 }
 
 // Bridge calls are serialized, and only the newest screen is ever drawn
@@ -226,16 +230,44 @@ function checkReminders() {
   }
 }
 
+const cardKey = (c: CareCard) => (c.kind === 'message' ? `m:${c.id}` : `d:${c.medKey}|${c.slot}`)
+
+// A family message comes before a dose that's due
+function careCard(view: Awaited<ReturnType<typeof getCare>>): CareCard | null {
+  const cards: CareCard[] = [
+    ...(view.message ? [{ kind: 'message' as const, ...view.message }] : []),
+    ...(view.due ? [{ kind: 'dose' as const, ...view.due }] : []),
+  ]
+  return cards.find(c => !tapped.has(cardKey(c))) ?? null
+}
+
+async function tapCare(card: CareCard) {
+  tapped.add(cardKey(card))
+  care = null
+  flash(card.kind === 'message' ? 'Got it.' : `${card.title} taken. Thank you.`, 4000)
+  try {
+    if (card.kind === 'message') await markSeen(card.id)
+    else await markTaken(card.medKey, card.slot)
+  } catch (err) {
+    console.warn('[halo] tap failed to save', err)
+    tapped.delete(cardKey(card))
+    flash("Couldn't save that. Please tap again.")
+  }
+  void poll()
+}
+
 let polling = false
 async function poll() {
   if (polling) return
   polling = true
   try {
-    state = await getState()
+    const [next, view] = await Promise.all([getState(), getCare().catch(() => undefined)])
+    state = next
     skewMs = new Date(state.now).getTime() - Date.now()
     failures = 0
     online = true
     checkReminders()
+    if (view) care = careCard(view)
     await messaging.poll()
   } catch (err) {
     if (++failures >= OFFLINE_AFTER_FAILURES) online = false
@@ -283,10 +315,11 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
   if (!inputEvent) return
   switch (inputEvent.eventType ?? OsEventTypeList.CLICK_EVENT) {
     case OsEventTypeList.CLICK_EVENT:
-      // While paused, a press opens the system exit dialog. Otherwise a stray tap does nothing:
-      // answers are spoken, not tapped.
+      // While paused, a press opens the system exit dialog. A family message or due dose on screen
+      // is acknowledged with a tap. Otherwise a stray tap does nothing: answers are spoken, not tapped.
       if (userPaused) void bridge.shutDownPageContainer(1)
       else if (messaging.visible) void messaging.click()
+      else if (care && !state?.prompt && !state?.resolved && !reminder) void tapCare(care)
       break
     case OsEventTypeList.LONG_PRESS_EVENT:
       if (!userPaused && messaging.visible && !startingReply) {

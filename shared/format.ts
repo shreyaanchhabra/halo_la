@@ -32,3 +32,18 @@ export function whenLabel(p: Pick<Plan, 'start' | 'allDay'>, now: Date): string 
 
 // "Maya: park", "dentist appointment"
 export const planTitle = (p: Pick<Plan, 'who' | 'activity'>) => (p.who.length ? `${p.who.join(' & ')}: ${p.activity}` : p.activity)
+
+const pad = (n: number) => String(n).padStart(2, '0')
+const utcStamp = (d: Date) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
+const dayStamp = (d: Date) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+
+// A link that opens Google Calendar with this event filled in, ready to save. No sign-in set up needed.
+export function googleCalendarUrl(p: Pick<Plan, 'who' | 'activity' | 'start' | 'allDay' | 'source'>): string {
+  const start = new Date(p.start)
+  const dates = p.allDay
+    ? `${dayStamp(start)}/${dayStamp(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1))}`
+    : `${utcStamp(start)}/${utcStamp(new Date(start.getTime() + 60 * 60_000))}`
+  const q = new URLSearchParams({ action: 'TEMPLATE', text: planTitle(p), dates })
+  if (p.source) q.set('details', `HALO heard: "${p.source.quote}"`)
+  return `https://calendar.google.com/calendar/render?${q}`
+}

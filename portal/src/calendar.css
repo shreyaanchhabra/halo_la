@@ -1,0 +1,40 @@
+/* Calendar page: month grid, needs-approval list, adding, syncing, trying it out */
+main.wide { max-width: 980px; }
+.card h3 { margin: 4px 0 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.card code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+.muted { color: var(--muted); font-weight: 400; }
+.banner { background: #fbf1dc; border-left: 3px solid #8a5a00; color: #5c3c00; padding: 10px 14px; border-radius: 4px; font-size: 0.9rem; }
+
+.ev p { margin: 0; }
+.ev .time { display: inline-block; min-width: 4.6em; font-variant-numeric: tabular-nums; }
+.ev.past { opacity: 0.55; }
+.ev.need { background: #f6fafc; margin: 0 -8px; padding: 12px 8px; border-radius: 6px; }
+.ev .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev .tags:empty { display: none; }
+.ev .quote { font-size: 0.88rem; color: var(--muted); }
+.ev .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; align-content: flex-start; justify-content: flex-end; }
+.ev a { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+.tag.warn { color: #8a5a00; background: #fbf1dc; border-color: #e7d3a4; }
+
+form.edit { display: grid; gap: 10px; width: 100%; }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; align-self: end; padding-bottom: 8px; }
+label.check input { width: auto; }
+select { font: inherit; color: var(--ink); padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); }
+a.button { font-weight: 600; padding: 9px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; text-decoration: none; }
+details summary { cursor: pointer; }
+details[hidden] { display: none; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chipbtn { background: var(--card); color: var(--ink); border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; font-weight: 600; }
+.chipbtn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chipbtn.on .muted { color: #d8e8ef; }
+
+.say { display: grid; grid-template-columns: minmax(0, 11rem) 1fr auto; gap: 12px; align-items: end; }
+@media (max-width: 620px) { .say { grid-template-columns: 1fr; } }
+.transcript li { display: block; font-size: 0.92rem; border-radius: 4px; }
+.transcript li.flash { background: #fff3c4; transition: background 0.4s; }
+
+/* The card style sets display:grid, which would otherwise override the hidden attribute */
+[hidden] { display: none !important; }
+.hint .chip { display: inline-block; padding: 1px 8px; margin-right: 6px; }

@@ -2,7 +2,14 @@
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HALO · Messages</title></head>
 <body>
-  <header class="top"><strong>HALO</strong><span>Family · Messages</span><a href="/">Care setup</a></header>
+  <header class="top">
+    <strong>HALO</strong>
+    <span>Care portal · Messages</span>
+    <nav>
+      <a href="/">Setup</a>
+      <a href="/calendar.html">Calendar</a>
+    </nav>
+  </header>
   <main>
     <p id="status" role="status" aria-live="polite" hidden></p>
     <section class="card">
@@ -20,6 +27,6 @@
     <section class="card"><h2>Replies</h2><ul id="replies" class="list"></ul></section>
     <section class="card"><h2>Activity</h2><ul id="activity" class="list"></ul></section>
   </main>
-  <script type="module" src="/src/pages/messages/index.ts"></script>
+  <script type="module" src="/src/messages.ts"></script>
 </body>
 </html>

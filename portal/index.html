@@ -9,14 +9,29 @@
     <header class="top">
       <strong>HALO</strong>
       <span>Care portal · Setup</span>
-      <a href="/refills.html">Medicine refills</a>
-      <a href="/calendar.html">Calendar</a>
+      <nav>
+        <a href="/calendar.html">Calendar</a>
+        <button type="button" id="ics-btn" class="secondary">Add to calendar (.ics)</button>
+        <a href="/patient.html" target="_blank">Open patient portal ↗</a>
+      </nav>
     </header>
 
     <main>
+      <section class="card" id="plans-card"></section>
+
       <section class="card">
         <h2>Patient</h2>
-        <label>Name <input id="patient-name" placeholder="e.g. Joe Martinez" /></label>
+        <div class="row">
+          <label>Name <input id="patient-name" placeholder="e.g. Joe Martinez" /></label>
+          <label>ZIP code <input id="patient-zip" inputmode="numeric" maxlength="5" placeholder="90024" /></label>
+        </div>
+        <p class="hint">The ZIP code is used to look up pharmacy prices on GoodRx.</p>
+      </section>
+
+      <section class="card">
+        <h2>Texts from HALO</h2>
+        <p class="hint">HALO texts family on iMessage when a dose is missed or a refill is due, and answers questions about meds and appointments.</p>
+        <div id="imessage"></div>
       </section>
 
       <section class="card">
@@ -47,9 +62,9 @@
 
       <section class="card">
         <h2>Prescriptions</h2>
-        <p class="hint">Upload a photo or PDF of each prescription.</p>
+        <p class="hint">Upload a photo or PDF of each prescription. HALO reads the medicines, dose times and appointments from it. Check what it read before relying on it.</p>
         <form id="rx-form">
-          <label>File <input id="rx-file" type="file" accept="image/*,application/pdf" required /></label>
+          <label>File <input id="rx-file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required /></label>
           <div class="row">
             <label>Prescribed by <input id="rx-doctor" placeholder="Dr. Patel" /></label>
             <label>Date <input id="rx-date" type="date" /></label>
@@ -57,10 +72,38 @@
           <label>Notes <input id="rx-notes" placeholder="Donepezil 5 mg, once daily at night" /></label>
           <button type="submit" id="rx-save">Upload prescription</button>
         </form>
+        <details class="by-hand" id="add-med-box">
+          <summary>Or add a medicine by hand</summary>
+          <form id="med-form">
+            <div class="row">
+              <label>Medicine <input id="m-name" placeholder="Donepezil" required /></label>
+              <label>Strength <input id="m-strength" placeholder="5 mg" /></label>
+            </div>
+            <label>Times each day <input id="m-times" placeholder="8:00 AM, 9:00 PM" required /></label>
+            <label>Instructions <input id="m-instructions" placeholder="Take 1 tablet with food" /></label>
+            <div class="row">
+              <label>Pills on hand now <input id="m-count" type="number" min="0" step="1" placeholder="30" /></label>
+              <label>Pills in one refill <input id="m-quantity" type="number" min="1" step="1" placeholder="30" /></label>
+            </div>
+            <div class="row">
+              <label>Prescribed by <input id="m-doctor" placeholder="Dr. Patel" /></label>
+              <label>Date <input id="m-date" type="date" /></label>
+            </div>
+            <p class="hint" id="m-error" role="alert" hidden></p>
+            <button type="submit">Add medicine</button>
+          </form>
+        </details>
         <ul id="prescriptions" class="list"></ul>
+      </section>
+      <section class="card">
+        <h2>Medicines</h2>
+        <p class="hint">From the prescriptions above. Pill counts go down when the patient taps "I took it". When about 7 days are left, HALO's errands agent looks up the cheapest GoodRx prices near the patient and shows them here. HALO never buys anything: you approve a price, a pickup reminder goes on the calendar, and you pick it up at that pharmacy.</p>
+        <div id="low-summary"></div>
+        <div id="refill-settings"></div>
+        <ul id="medicines" class="list"></ul>
       </section>
     </main>
 
-    <script type="module" src="/src/pages/setup/index.ts"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
