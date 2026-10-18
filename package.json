@@ -22,6 +22,9 @@
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.16",
+    "@photon-ai/api": "^0.5.0",
+    "@sentry/browser": "^11.8.0",
+    "@sentry/node": "^11.8.0",
     "browser-use-sdk": "^3.12.1"
   }
 }

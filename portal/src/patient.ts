@@ -1,4 +1,7 @@
 import './patient.css'
+import { initSentry } from './sentry'
+
+initSentry('patient')
 import { addTranscript, esc, fileUrl, loadData, loadDoses, loadTranscripts, onDataChanged, setDose } from './api'
 import { appointments, formatTime, scheduleFor, ymd, type ScheduleItem } from './schedule'
 import type { DoseLog, HaloData, TranscriptLine } from './types'

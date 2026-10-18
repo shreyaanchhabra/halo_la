@@ -1,24 +1,28 @@
 import './style.css'
+import { initSentry } from './sentry'
+
+initSentry('care')
 import {
-  checkPrices, esc, fileUrl, loadData, loadDoses, loadPrices, onDataChanged, readPrescription, removeFile, saveData,
-  transcribe, uploadFile,
+  checkPrices, esc, fileUrl, loadData, loadDoses, loadImessage, loadPrices, onDataChanged, readPrescription, removeFile,
+  saveData, transcribe, uploadFile,
 } from './api'
 import { allMedicines, daysLeft, pillsLeft, refillDue, type MedEntry } from './meds'
 import { downloadIcs, formatTime, ymd } from './schedule'
-import type { DoseLog, HaloData, PriceCheck, Prescription } from './types'
+import type { DoseLog, HaloData, ImessageStatus, PriceCheck, Prescription, TextAlertKind, TextMessage } from './types'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 let data: HaloData = { patient: { name: '' }, people: [], prescriptions: [] }
 let doses: DoseLog[] = []
 let prices: Record<string, PriceCheck> = {}
+let imessage: ImessageStatus | null = null
 // Prescriptions and people with a request to Groq in progress
 const busy = new Set<string>()
 // Medicines whose GoodRx lookup this page already started on its own, so it only does it once
 const autoChecked = new Set<string>()
 
 async function load() {
-  ;[data, doses, prices] = await Promise.all([loadData(), loadDoses(), loadPrices()])
+  ;[data, doses, prices, imessage] = await Promise.all([loadData(), loadDoses(), loadPrices(), loadImessage().catch(() => null)])
   for (const [id, value] of [['patient-name', data.patient.name], ['patient-zip', data.patient.zip ?? '']]) {
     const input = $<HTMLInputElement>(id)
     if (document.activeElement !== input) input.value = value
@@ -47,10 +51,33 @@ function renderPrices(e: MedEntry) {
     </div>`
 }
 
+const TEXTED: Record<TextAlertKind, string> = {
+  missed: 'Texted family about a missed dose',
+  refill: 'Texted family about this refill',
+  prices: 'Texted family the GoodRx prices',
+}
+
+function renderTexted(e: MedEntry) {
+  const alert = imessage?.alerts[e.key]
+  return alert ? `<p class="texted">${TEXTED[alert.kind]} · ${shortDate(alert.at)}</p>` : ''
+}
+
+const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+const MARKED_BY = { imessage: 'by text', glasses: 'on the glasses' } as const
+
+// Today's doses that were marked away from this page
+function renderMarked(e: MedEntry) {
+  const today = ymd(new Date())
+  return doses
+    .filter(d => d.medKey === e.key && d.by && d.slot.startsWith(today))
+    .map(d => `<p class="texted">${formatTime(d.slot.slice(11))} dose marked taken ${MARKED_BY[d.by!]} · ${clockTime(d.at)}</p>`)
+    .join('')
+}
+
 function renderRefill(e: MedEntry) {
   const refill = data.refills?.[e.key]
   if (refill?.status === 'approved') {
-    return `<p class="refill ok">Refill approved ${shortDate(refill.at)}${refill.pharmacy ? ` at ${esc(refill.pharmacy)}` : ''}${refill.price != null ? `, ${money(refill.price)}` : ''}. Order it with the pharmacy, then update the pill count.</p>`
+    return `<p class="refill ok">Refill approved${refill.via === 'imessage' ? ' by text' : ''} ${shortDate(refill.at)}${refill.pharmacy ? ` at ${esc(refill.pharmacy)}` : ''}${refill.price != null ? `, ${money(refill.price)}` : ''}. Order it with the pharmacy, then update the pill count.</p>`
   }
   if (!refillDue(e, data, doses) || refill?.status === 'dismissed') return ''
   const best = prices[e.key]?.quotes?.[0]
@@ -84,6 +111,8 @@ function renderMedicines() {
             <button type="submit" class="secondary">Update count</button>
           </form>
           ${renderRefill(e)}
+          ${renderMarked(e)}
+          ${renderTexted(e)}
           ${renderPrices(e)}
         </div>
         <div class="actions">
@@ -138,7 +167,31 @@ function renderReading(rx: Prescription) {
     </div>`
 }
 
+function renderImessage() {
+  const s = imessage
+  if (!s?.configured) {
+    $('imessage').innerHTML = '<p class="status error">Texting is off. Add PHOTON_PROJECT_ID, PHOTON_API_KEY and PHOTON_AGENT_NUMBER to portal/.env, then restart the portal.</p>'
+    return
+  }
+  const glasses = (m: TextMessage) => m.glassesId
+    ? ` · sent to glasses, ${m.glassesSeenAt ? `seen ${clockTime(m.glassesSeenAt)}` : 'not seen yet'}`
+    : ''
+  $('imessage').innerHTML = `
+    <p class="connect">Text <b>hi</b> to <b>${esc(s.agentNumber)}</b> from your iPhone to connect.</p>
+    ${s.error ? `<p class="status error">${esc(s.error)}</p>` : ''}
+    <p class="status">${s.caregivers.length
+      ? `Connected: ${s.caregivers.map(c => `<span class="tag">${esc(c.handle)}${c.paused ? ' · alerts paused' : ''}</span>`).join(' ')}`
+      : 'No one connected yet.'}</p>
+    <p class="status">Patient's glasses: ${s.glassesOnline ? 'connected' : 'offline'}. Text HALO "tell ${esc(data.patient.name.split(' ')[0] || 'them')}…" to send a message there.</p>
+    ${s.messages.length ? `<ol class="thread">${s.messages.slice(-12).map(m => `
+      <li class="${m.direction}">
+        <span class="bubble">${esc(m.text)}</span>
+        <small>${m.direction === 'in' ? esc(m.handle) : m.alert ? 'HALO alert' : 'HALO'} · ${clockTime(m.at)}${glasses(m)}</small>
+      </li>`).join('')}</ol>` : ''}`
+}
+
 function render() {
+  renderImessage()
   $('people').innerHTML = data.people.length
     ? data.people.map(p => `
       <li>

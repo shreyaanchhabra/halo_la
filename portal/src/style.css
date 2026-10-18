@@ -84,3 +84,12 @@ summary { cursor: pointer; }
 .refill.ok { background: #e3f1e8; border: 1px solid #a9d1b6; color: #1f4d30; }
 .refill-actions { display: flex; gap: 14px; align-items: center; }
 button.link:disabled { opacity: 0.5; cursor: wait; }
+
+.connect { margin: 0; }
+.list p.texted { color: var(--accent); font-size: 0.85rem; }
+.thread { list-style: none; margin: 0; padding: 12px; display: grid; gap: 8px; background: var(--bg); border-radius: 6px; max-height: 360px; overflow-y: auto; }
+.thread li { display: grid; gap: 2px; justify-items: start; max-width: 80%; }
+.thread li.out { justify-self: end; justify-items: end; }
+.thread .bubble { padding: 7px 11px; border-radius: 14px; background: var(--card); border: 1px solid var(--rule); font-size: 0.9rem; white-space: pre-wrap; }
+.thread li.out .bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
+.thread small { color: var(--muted); font-size: 0.75rem; }
