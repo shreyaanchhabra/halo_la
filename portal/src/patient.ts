@@ -131,7 +131,7 @@ function renderLow() {
   if (!low.length) { box.innerHTML = ''; return }
   const status = (key: string) => {
     const r = refills?.refills.find(x => x.medKey === key && x.status !== 'cancelled' && x.status !== 'received')
-    if (r?.status === 'ordered' && r.order) return `More is on the way. Pickup: ${new Date(r.order.readyAt).toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' })}.`
+    if (r?.status === 'approved' && r.pickupAt) return `Your family is getting more. Pickup: ${new Date(r.pickupAt).toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' })}.`
     return 'Your family is arranging more.'
   }
   box.innerHTML = `<p class="label">Running low</p>${low.map(({ entry, supply: s }) => `

@@ -16,6 +16,7 @@ export type Medicine = {
   times: string[] // 24-hour "HH:MM"
   quantity: number | null
   refills: number | null
+  stopped?: boolean // no longer taken: hidden from the schedule and refills, but the numbering of the others stays
 }
 
 export type Appointment = {
@@ -33,7 +34,7 @@ export type PrescriptionReading = {
 
 export type Prescription = {
   id: string
-  file: string
+  file: string // '' when the family typed the medicine in by hand
   originalName: string
   doctor: string
   date: string

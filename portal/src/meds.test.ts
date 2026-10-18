@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { medKey } from './schedule.ts'
-import { runningLow, supply, supplyText, allMedicines } from './meds.ts'
+import { runningLow, supply, supplyText, allMedicines, parseTimes } from './meds.ts'
 import type { DoseLog, HaloData } from './types'
 
 const KEY = medKey('rx1', 0)
@@ -49,5 +49,28 @@ describe('running low', () => {
     assert.equal(supplyText({ left: 7, days: 7, low: true }), '7 pills left (about 7 days)')
     assert.equal(supplyText({ left: 1, days: 1, low: true }), '1 pill left (about 1 day)')
     assert.equal(supplyText({ left: 5, days: null, low: false }), '5 pills left')
+  })
+})
+
+describe('parseTimes', () => {
+  test('reads times the way a family writes them', () => {
+    assert.deepEqual(parseTimes('8 am, 9:30 PM'), ['08:00', '21:30'])
+    assert.deepEqual(parseTimes('9pm and 8am'), ['08:00', '21:00'])
+    assert.deepEqual(parseTimes('21:00'), ['21:00'])
+    assert.deepEqual(parseTimes('12 am, 12 pm'), ['00:00', '12:00'])
+  })
+  test('rejects anything that is not a time', () => {
+    for (const bad of ['', 'morning', '25:00', '13 pm', '8:75 am', '8, nope']) assert.equal(parseTimes(bad), null, bad)
+  })
+})
+
+describe('stopped medicines', () => {
+  test('leave the schedule and the refill check, and the others keep their keys', () => {
+    const data = { patient: { name: '' }, people: [], prescriptions: [{ id: 'r', file: '', originalName: 'x', doctor: '', date: '', notes: '', uploadedAt: '2026-10-01T00:00:00Z',
+      reading: { medicines: [
+        { name: 'A', strength: '', form: '', instructions: '', times: ['08:00'], quantity: 30, refills: null, stopped: true },
+        { name: 'B', strength: '', form: '', instructions: '', times: ['08:00'], quantity: 30, refills: null },
+      ], appointments: [], notes: [], readAt: '' } }] }
+    assert.deepEqual(allMedicines(data).map(e => [e.key, e.med.name]), [['r:1', 'B']])
   })
 })

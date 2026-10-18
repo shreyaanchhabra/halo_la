@@ -2,19 +2,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type http from 'node:http'
 import { createRefills, RefillError } from './refills.ts'
-import { createPharmacy } from './pharmacy.ts'
-import { browserUseDriver, localDriver } from './errands.ts'
+import { goodrxFinder, noKeyFinder, type PriceFinder } from './errands.ts'
 import type { Calendar } from './calendar.ts'
 import type { DoseLog, HaloData } from '../src/types'
 
-// Refill endpoints and the test pharmacy website, for the portal's dev server (see vite.config.ts).
+// Refill endpoints, for the portal's dev server (see vite.config.ts).
 
 export type RefillRoutesOptions = {
   dataDir: string
   notify?: () => void
   calendar: Pick<Calendar, 'addManual'>
-  browserUseKey?: string // with siteUrl, the errands agent drives a real browser instead of the built-in shortcut
-  siteUrl?: string // where this portal's /test-pharmacy pages are reachable from the internet
+  browserUseKey?: string // the errands agent uses it to look up real GoodRx prices
+  finder?: PriceFinder // tests
   checkEveryMs?: number
 }
 
@@ -41,13 +40,11 @@ export function refillRoutes(o: RefillRoutesOptions) {
   const readJson = <T>(file: string, fallback: T): T => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return fallback } }
   const readData = (): HaloData => ({ patient: { name: '' }, people: [], prescriptions: [], ...readJson<Partial<HaloData>>(haloFile, {}) })
 
-  const pharmacy = createPharmacy({ dataDir: o.dataDir })
-  const driver = o.browserUseKey && o.siteUrl ? browserUseDriver({ apiKey: o.browserUseKey, siteUrl: o.siteUrl, pharmacy }) : localDriver(pharmacy)
+  const finder = o.finder ?? (o.browserUseKey ? goodrxFinder({ apiKey: o.browserUseKey }) : noKeyFinder)
 
   const refills = createRefills({
     dataDir: o.dataDir,
-    driver,
-    pharmacy,
+    finder,
     notify: o.notify,
     readData,
     readDoses: () => readJson<DoseLog[]>(dosesFile, []),
@@ -67,7 +64,6 @@ export function refillRoutes(o: RefillRoutesOptions) {
 
   // Returns true when the request was one of ours
   async function handle(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
-    if (await pharmacy.handle(req, res, url)) return true
     if (!url.pathname.startsWith('/api/refills')) return false
     const route = `${req.method} ${url.pathname}`
     const body = async () => JSON.parse((await readBody(req)).toString() || '{}')
@@ -89,5 +85,5 @@ export function refillRoutes(o: RefillRoutesOptions) {
     return true
   }
 
-  return { refills, pharmacy, handle, check: () => refills.check(), stop: () => clearInterval(timer) }
+  return { refills, handle, check: () => refills.check(), stop: () => clearInterval(timer) }
 }

@@ -3,18 +3,18 @@ import path from 'node:path'
 import { allMedicines, pillsLeft, refillDue } from '../src/meds.ts'
 import type { DoseLog, HaloData } from '../src/types'
 import { formatCents, type ActivityEntry, type Refill, type RefillState, type RefillStatus } from '../../shared/refill-types.ts'
-import type { PharmacyDriver } from './errands.ts'
-import type { Pharmacy } from './pharmacy.ts'
+import type { PriceFinder } from './errands.ts'
 
 // Refill before it runs out (Flow E).
 //
 //   1. The pill count drops to 7 days left.
-//   2. The errands agent shops on the pharmacy website and STOPS before paying.
-//   3. The family gets "Refill Donepezil 5 mg, $12.40, approve?" in the care portal.
-//   4. Approval, within the family's spending limit, places the order, and the pickup goes on the calendar.
+//   2. The errands agent looks up GoodRx prices near the patient (Browser Use) and STOPS. Nothing is bought.
+//   3. The family sees "Refill Donepezil 5 mg: $12.40 at CVS (GoodRx), approve?" in the care portal.
+//   4. Approving, within the family's spending limit, puts a pickup reminder on the calendar.
 //
+// HALO never places an order. GoodRx is a price and coupon site, so the family picks the medicine up.
 // Pill counts come from the care portal's own data (stock, doses, prescriptions), so there is one count.
-// Every transition is persisted before it returns, and nothing is ever ordered twice.
+// Every change is saved before it returns.
 
 export class RefillError extends Error {
   status: number
@@ -23,20 +23,18 @@ export class RefillError extends Error {
 
 export type RefillOptions = {
   dataDir: string // ':memory:' keeps everything in memory (tests)
-  driver: PharmacyDriver
-  pharmacy: Pharmacy
+  finder: PriceFinder
   readData: () => HaloData
   readDoses: () => DoseLog[]
   setStock: (medKey: string, count: number, at: string) => void // the family's new pill count
   addToCalendar: (event: { activity: string; start: string }) => { id: string }
   notify?: () => void
   now?: () => Date
-  quoteTtlMs?: number
   defaultLimitCents?: number
 }
 
-const OPEN: RefillStatus[] = ['preparing', 'awaiting_approval', 'ordering', 'ordered', 'rejected', 'needs_review']
-const STALE_WHEN_COUNT_UPDATED: RefillStatus[] = ['preparing', 'awaiting_approval', 'rejected']
+const OPEN: RefillStatus[] = ['preparing', 'awaiting_approval', 'approved', 'rejected', 'needs_review']
+const STALE_WHEN_COUNT_UPDATED: RefillStatus[] = ['preparing', 'awaiting_approval', 'approved', 'rejected']
 const MAX_ACTIVITY = 200
 
 const text = (v: unknown, name: string) => {
@@ -49,7 +47,6 @@ export function createRefills(o: RefillOptions) {
   const file = path.join(o.dataDir, 'refills.json')
   const now = o.now ?? (() => new Date())
   const notify = o.notify ?? (() => {})
-  const ttl = o.quoteTtlMs ?? 30 * 60_000
 
   let data: Pick<RefillState, 'settings' | 'refills' | 'activity'> = { settings: { spendingLimitCents: o.defaultLimitCents ?? 2500 }, refills: [], activity: [] }
   try { if (!memory) data = { ...data, ...JSON.parse(fs.readFileSync(file, 'utf8')) } } catch { /* first run */ }
@@ -74,15 +71,6 @@ export function createRefills(o: RefillOptions) {
     return r
   }
 
-  // A restart during checkout is ambiguous. A person looks; nothing is ordered again on its own.
-  for (const r of data.refills) {
-    if (r.status === 'ordering' && !r.order) {
-      r.status = 'needs_review'
-      r.error = 'HALO restarted while the order was being placed. Check the pharmacy before ordering again.'
-      log(r.error, r.id)
-    }
-  }
-
   // ---- 1. the pill count ---------------------------------------------------------------------------------
 
   // Look at every medicine: start a refill when 7 days are left, drop one that is no longer needed
@@ -100,7 +88,7 @@ export function createRefills(o: RefillOptions) {
           quantity: e.med.quantity ?? 30, status: 'preparing', createdAt: now().toISOString(),
         }
         data.refills.push(r)
-        log(`${r.medicine} is down to 7 days or less. Looking for a refill.`, r.id)
+        log(`${r.medicine} is down to 7 days or less. Looking up GoodRx prices.`, r.id)
         changed = true
       } else if (!due && open && STALE_WHEN_COUNT_UPDATED.includes(open.status)) {
         open.status = 'cancelled'
@@ -117,19 +105,27 @@ export function createRefills(o: RefillOptions) {
     for (const r of data.refills) if (r.status === 'preparing') startPreparing(r)
   }
 
-  // ---- 2. the errands agent shops, and stops before paying -------------------------------------------------
+  // ---- 2. the errands agent looks up prices, and stops ------------------------------------------------------
 
   function startPreparing(r: Refill) {
     if (inflight.has(r.id)) return
     const job = (async () => {
       try {
-        const q = await o.driver.prepare({ medicine: r.medicine, quantity: r.quantity })
-        r.quote = { ...q, expiresAt: new Date(now().getTime() + ttl).toISOString() }
+        const care = o.readData()
+        const entry = allMedicines(care).find(e => e.key === r.medKey)
+        const q = await o.finder.prepare({
+          medicine: r.medicine, quantity: r.quantity, zip: care.patient.zip,
+          med: entry && { name: entry.med.name, strength: entry.med.strength, form: entry.med.form },
+        })
+        if (r.status !== 'preparing') return // cancelled or turned down while the lookup ran: drop the answer
+        r.quantity = q.quantity // the price is for this many tablets
+        r.quote = { ...q, expiresAt: new Date(now().getTime() + o.finder.quoteTtlMs).toISOString() }
         r.status = 'awaiting_approval'
-        log(`${q.pharmacy} quote: ${r.quantity} tablets for ${formatCents(q.priceCents)}. Nothing has been paid. Waiting for the family to approve.`, r.id)
+        log(`GoodRx: ${formatCents(q.priceCents)} for ${q.quantity} tablets at ${q.pharmacy}${q.priceType ? ` (${q.priceType})` : ''}. Nothing has been bought. Waiting for the family to approve.`, r.id)
       } catch (err) {
+        if (r.status !== 'preparing') return
         r.status = 'needs_review'
-        r.error = `The pharmacy check did not finish: ${err instanceof Error ? err.message : String(err)}`
+        r.error = `The price lookup did not finish: ${err instanceof Error ? err.message : String(err)}`
         log(r.error, r.id)
       }
       persist()
@@ -137,7 +133,7 @@ export function createRefills(o: RefillOptions) {
     inflight.set(r.id, job)
   }
 
-  // ---- 3 and 4. approval, the order, and the calendar --------------------------------------------------------
+  // ---- 3 and 4. approval and the pickup reminder -------------------------------------------------------------
 
   const limit = () => data.settings.spendingLimitCents
 
@@ -146,76 +142,45 @@ export function createRefills(o: RefillOptions) {
     const by = text(input.approvedBy, 'Your name')
     if (r.status !== 'awaiting_approval' || !r.quote) throw new RefillError('This refill is not waiting for approval', 409)
     if (r.quote.priceCents !== input.expectedPriceCents) throw new RefillError('The price changed. Look at the current price before approving.', 409)
-    if (Date.parse(r.quote.expiresAt) <= now().getTime()) throw new RefillError('This price has expired. Get a fresh price first.', 409)
+    if (Date.parse(r.quote.expiresAt) <= now().getTime()) throw new RefillError('This price is out of date. Get fresh prices first.', 409)
     if (r.quote.priceCents > limit()) throw new RefillError(`This refill costs ${formatCents(r.quote.priceCents)}, which is over the family limit of ${formatCents(limit())}.`, 409)
-    try { o.pharmacy.approve(r.quote.cartId, by, r.quote.priceCents) } catch (e) { throw new RefillError((e as Error).message, 409) }
     r.approvedBy = by
     r.approvedAt = now().toISOString()
-    r.status = 'ordering'
-    log(`${by} approved ${formatCents(r.quote.priceCents)} for ${r.medicine}.`, id)
+    const pickup = new Date(now()); pickup.setDate(pickup.getDate() + 1); pickup.setHours(10, 0, 0, 0) // tomorrow at 10; the family can move it on the calendar
+    r.pickupAt = pickup.toISOString()
+    r.status = 'approved'
+    r.calendarPlanId = o.addToCalendar({ activity: `Pick up ${r.medicine} at ${r.quote.pharmacy}`, start: r.pickupAt }).id
+    log(`${by} approved ${formatCents(r.quote.priceCents)} at ${r.quote.pharmacy}. A pickup reminder is on the calendar for ${pickup.toLocaleString()}.`, id)
     persist()
-    startOrdering(r)
     return r
-  }
-
-  function startOrdering(r: Refill) {
-    if (inflight.has(r.id)) return
-    const job = (async () => {
-      try {
-        const placed = await o.driver.place(r.quote!.cartId)
-        complete(r, placed)
-      } catch (err) {
-        // The pharmacy's own record wins over an ambiguous failure
-        const placed = o.pharmacy.get(r.quote!.cartId)?.order
-        if (placed) { complete(r, { orderId: placed.id, readyAt: placed.readyAt, method: placed.method, priceCents: placed.priceCents }); return }
-        r.status = 'needs_review'
-        r.error = `The order did not complete: ${err instanceof Error ? err.message : String(err)}. Check the pharmacy before ordering again.`
-        log(r.error, r.id)
-        persist()
-      }
-    })().finally(() => inflight.delete(r.id))
-    inflight.set(r.id, job)
-  }
-
-  function complete(r: Refill, placed: { orderId: string; readyAt: string; method: 'pickup' | 'delivery'; priceCents: number }) {
-    r.order = { id: placed.orderId, placedAt: now().toISOString(), readyAt: placed.readyAt, method: placed.method, priceCents: placed.priceCents }
-    r.status = 'ordered'
-    delete r.error
-    if (!r.calendarPlanId) {
-      const verb = placed.method === 'delivery' ? 'Delivery of' : 'Pick up'
-      r.calendarPlanId = o.addToCalendar({ activity: `${verb} ${r.medicine}`, start: placed.readyAt }).id
-    }
-    log(`Order ${placed.orderId} placed for ${formatCents(placed.priceCents)}. ${placed.method === 'delivery' ? 'Delivery' : 'Pickup'}: ${new Date(placed.readyAt).toLocaleString()}. Added to the calendar.`, r.id)
-    persist()
   }
 
   function reject(id: string): Refill {
     const r = get(id)
     if (r.status !== 'preparing' && r.status !== 'awaiting_approval') throw new RefillError('This refill can no longer be turned down', 409)
     r.status = 'rejected'
-    log('The family said not now. Nothing was ordered, and HALO will not try again until asked.', id)
+    log('The family said not now. HALO will not look again until asked.', id)
     persist()
     return r
   }
 
-  // A fresh price, and another approval, after a no, an expired price or a failed check
+  // Fresh prices, and another approval, after a no, an out-of-date price or a failed lookup
   function requote(id: string): Refill {
     const r = get(id)
-    if (!['rejected', 'awaiting_approval', 'needs_review'].includes(r.status)) throw new RefillError('This refill cannot get a new price right now', 409)
-    if (r.quote && o.pharmacy.get(r.quote.cartId)?.order) throw new RefillError('An order already exists for this refill. Check the pharmacy.', 409)
+    if (!['rejected', 'awaiting_approval', 'needs_review'].includes(r.status)) throw new RefillError('This refill cannot get new prices right now', 409)
     delete r.quote; delete r.approvedBy; delete r.approvedAt; delete r.error
     r.status = 'preparing'
-    log('The family asked for a fresh price.', id)
+    log('The family asked for fresh prices.', id)
     persist()
     startPreparing(r)
     return r
   }
 
-  // The medicine arrived: the pill count goes up once, and the refill is finished
+  // The medicine is in hand: the pill count goes up once, and the refill is finished
   function received(id: string): Refill {
     const r = get(id)
     if (r.status === 'received') return r
-    if (r.status !== 'ordered') throw new RefillError('Only an order the pharmacy confirmed can be marked as received', 409)
+    if (r.status !== 'approved') throw new RefillError('Only an approved refill can be marked as received', 409)
     const care = o.readData()
     const entry = allMedicines(care).find(e => e.key === r.medKey)
     if (entry) o.setStock(r.medKey, (pillsLeft(entry, care, o.readDoses()) ?? 0) + r.quantity, now().toISOString())
@@ -233,9 +198,9 @@ export function createRefills(o: RefillOptions) {
     return data.settings
   }
 
-  const state = (): RefillState => ({ ...data, refills: [...data.refills].reverse(), activity: [...data.activity].reverse().slice(0, 50), driver: o.driver.name })
+  const state = (): RefillState => ({ ...data, refills: [...data.refills].reverse(), activity: [...data.activity].reverse().slice(0, 50), driver: o.finder.name })
 
-  // Resume anything that was mid-air when HALO last stopped
+  // Resume any lookup that was mid-air when HALO last stopped
   for (const r of data.refills) if (r.status === 'preparing') queueMicrotask(() => startPreparing(r))
 
   return {

@@ -66,11 +66,32 @@
           <label>Notes <input id="rx-notes" placeholder="Donepezil 5 mg, once daily at night" /></label>
           <button type="submit" id="rx-save">Upload prescription</button>
         </form>
+        <details class="by-hand" id="add-med-box">
+          <summary>Or add a medicine by hand</summary>
+          <form id="med-form">
+            <div class="row">
+              <label>Medicine <input id="m-name" placeholder="Donepezil" required /></label>
+              <label>Strength <input id="m-strength" placeholder="5 mg" /></label>
+            </div>
+            <label>Times each day <input id="m-times" placeholder="8:00 AM, 9:00 PM" required /></label>
+            <label>Instructions <input id="m-instructions" placeholder="Take 1 tablet with food" /></label>
+            <div class="row">
+              <label>Pills on hand now <input id="m-count" type="number" min="0" step="1" placeholder="30" /></label>
+              <label>Pills in one refill <input id="m-quantity" type="number" min="1" step="1" placeholder="30" /></label>
+            </div>
+            <div class="row">
+              <label>Prescribed by <input id="m-doctor" placeholder="Dr. Patel" /></label>
+              <label>Date <input id="m-date" type="date" /></label>
+            </div>
+            <p class="hint" id="m-error" role="alert" hidden></p>
+            <button type="submit">Add medicine</button>
+          </form>
+        </details>
         <ul id="prescriptions" class="list"></ul>
       </section>
       <section class="card">
         <h2>Medicines</h2>
-        <p class="hint">From the prescriptions above. Pill counts go down when the patient taps "I took it". When about 7 days are left, HALO's errands agent shops on the pharmacy website and stops before paying. You approve the price, and only then is the order placed. The pickup goes on the calendar.</p>
+        <p class="hint">From the prescriptions above. Pill counts go down when the patient taps "I took it". When about 7 days are left, HALO's errands agent looks up the cheapest GoodRx prices near the patient and shows them here. HALO never buys anything: you approve a price, a pickup reminder goes on the calendar, and you pick it up at that pharmacy.</p>
         <div id="low-summary"></div>
         <div id="refill-settings"></div>
         <ul id="medicines" class="list"></ul>

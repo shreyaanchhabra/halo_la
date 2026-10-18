@@ -46,7 +46,7 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
       const calendar = calendarRoutes({ apiKey: groqKey, dataDir: DATA_DIR, notify, answerWindowMs: Number(process.env.HALO_ANSWER_WINDOW_MS) || undefined })
       server.httpServer?.on('close', calendar.stop)
       // Refill before it runs out: pill count -> errands agent -> family approval -> order -> pickup on the calendar
-      const refills = refillRoutes({ dataDir: DATA_DIR, notify, calendar: calendar.cal, browserUseKey: keys.browserUse, siteUrl: process.env.HALO_PHARMACY_URL })
+      const refills = refillRoutes({ dataDir: DATA_DIR, notify, calendar: calendar.cal, browserUseKey: keys.browserUse })
       server.httpServer?.on('close', refills.stop)
       const needKey = () => {
         if (!groqKey) throw new Error('GROQ_API_KEY is missing. Add it to portal/.env and restart the portal.')
@@ -98,6 +98,12 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
           } else if (url.pathname === '/api/prices' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify(readJson(PRICES_FILE, {})))
+          } else if (url.pathname === '/api/prices' && req.method === 'DELETE') {
+            const all = readJson<Record<string, unknown>>(PRICES_FILE, {})
+            delete all[url.searchParams.get('key') ?? '']
+            writeJson(PRICES_FILE, all)
+            notify()
+            res.end('{"ok":true}')
           } else if (url.pathname === '/api/prices' && req.method === 'POST') {
             if (!keys.browserUse) throw new Error('BROWSER_USE_API_KEY is missing. Add it to portal/.env and restart the portal.')
             const { key, med, zip } = JSON.parse((await readBody(req)).toString())

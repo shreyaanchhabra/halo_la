@@ -54,6 +54,7 @@ export const loadDoses = () => call<DoseLog[]>('/api/doses')
 export const setDose = (medKey: string, slot: string, taken: boolean) =>
   call('/api/doses', { method: 'POST', body: JSON.stringify({ medKey, slot, taken }) })
 
+export const clearPrices = (key: string) => call(`/api/prices?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
 export const loadPrices = () => call<Record<string, PriceCheck>>('/api/prices')
 
 // Starts a Browser Use lookup on GoodRx; the result arrives later through onDataChanged

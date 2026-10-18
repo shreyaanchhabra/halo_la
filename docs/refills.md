@@ -1,56 +1,60 @@
 # Refill before it runs out (Flow E)
 
 1. The pill count drops to 7 days left.
-2. The errands agent shops on a pharmacy website and **stops before paying**.
-3. The family sees "Refill Donepezil 5 mg, $12.40, approve?" in the care portal.
-4. Approving, within the family's spending limit, places the order, and the pickup goes on the calendar.
+2. The errands agent looks up the cheapest **GoodRx** prices near the patient, using Browser Use, and stops. Nothing is bought.
+3. The family sees "Refill Donepezil 5 mg: $12.40 at CVS (GoodRx coupon), approve?" in the care portal, with the other prices.
+4. Approving, within the family's spending limit, puts a **pickup reminder** on the calendar.
+
+HALO never places an order. GoodRx is a price and coupon site, so the family picks the medicine up at that pharmacy.
+
+## Setup
+
+Add to `portal/.env` and restart the portal:
+
+```
+BROWSER_USE_API_KEY=...
+```
+
+Save the patient's **ZIP code** on the setup page. Prices are looked up for that area. Without a key or a ZIP code, the refill says what is missing instead of showing made-up prices.
 
 ## Where it lives
 
 | What | Where |
 | --- | --- |
 | Pill count (one count, shared with the patient's "I took it" button) | `portal/src/meds.ts`: family count (`stock`) minus doses taken since |
-| Refill lifecycle, approval rules, calendar entry | `portal/server/refills.ts` |
-| Errands agent: built-in driver and Browser Use driver | `portal/server/errands.ts` |
-| Test pharmacy website and its cart/order rules | `portal/server/pharmacy.ts` (served at `/test-pharmacy`) |
+| Refill lifecycle and approval rules | `portal/server/refills.ts` |
+| Errands agent: GoodRx price lookup through Browser Use | `portal/server/errands.ts`, `portal/server/goodrx.ts` |
 | Endpoints | `portal/server/refill-routes.ts` |
 | Care portal UI | Medicines card in `portal/src/main.ts` |
-| Saved state | `portal/data/refills.json`, `portal/data/pharmacy.json` |
+| Saved state | `portal/data/refills.json` |
 
-Refills are re-checked whenever a dose is logged, the care data is saved (a new pill count or prescription), and once a minute.
+Refills are re-checked whenever a dose is logged, the care data is saved (a new pill count, a prescription, the ZIP code), and once a minute.
 
-## Rules that are enforced
+## Rules
 
 - One open refill per medicine. A refill is cancelled if the pill count is updated so it is no longer due.
-- The errands agent stops at the cart. The pharmacy site refuses "Place order" unless the family approved **that cart at that exact price**.
-- Approval needs the family member's name, the exact price that was shown, a price that has not expired (30 minutes), and a price within the spending limit (default $25; set it in the Medicines card).
-- Approving twice, or pressing Place order twice, never orders twice and never adds a second calendar entry.
-- If something fails or HALO restarts mid-checkout, the refill goes to "needs a person" and is **never retried automatically**. If the pharmacy's own record shows an order was placed, that wins over the error.
-- "Not now" pauses the refill until the family asks for a fresh price.
-- "I have it" adds the tablets to the pill count once.
+- **A lookup only starts when a refill is due**, and only once per refill. Each lookup uses Browser Use credits (the code caps one at $1 and 8 minutes), so checking again and again never repeats it.
+- The family sees the five cheapest prices. The cheapest is the one that is approved.
+- Approval needs the family member's name, the exact price that was shown, prices that are not out of date (6 hours), and a price within the spending limit (default $25; set it in the Medicines card).
+- Approving twice never adds a second reminder.
+- "Not now" stops HALO looking again until the family asks. A failed lookup waits for a person and is never retried automatically.
+- The pickup reminder is for tomorrow at 10:00. Move it on the calendar if you go at another time.
+- "I have it" adds the tablets to the pill count once. GoodRx may offer the closest size; the count goes up by the size that was priced.
 
 ## Endpoints
 
 | Method | Path | |
 | --- | --- | --- |
-| GET | `/api/refills` | refills, settings, activity log, which driver is in use |
+| GET | `/api/refills` | refills, settings, activity log, where prices come from |
 | PUT | `/api/refills/settings` | `{ "spendingLimitCents": 2000 }` |
 | POST | `/api/refills/check` | look at every medicine now |
 | POST | `/api/refills/:id/approve` | `{ "approvedBy": "Maya", "expectedPriceCents": 1240 }` |
 | POST | `/api/refills/:id/reject` \| `requote` \| `received` | |
 
-## Errands agent
-
-**Built in (default).** Works with no keys and no browser. It calls the test pharmacy in-process, through the same cart and approval rules the website uses. Prices are synthetic: Donepezil 5 mg × 30 is $12.40, Memantine 5 mg × 60 is $28.60, anything else is $0.45 a tablet. No real medicine is ordered and no money moves.
-
-**Browser Use (real browser).** Set `BROWSER_USE_API_KEY` in `portal/.env` **and** `HALO_PHARMACY_URL` to a public address of this portal (for example an ngrok or Vultr URL), because Browser Use Cloud cannot reach `localhost`. The agent then runs twice: once to search, add to cart and stop on the review page, and once after approval to press "Place order". The result is checked against the pharmacy's own record before it is trusted.
-
-> The Browser Use driver has **not** been run against the live service: no key was available when this was built. The built-in driver and everything around it is tested.
-
 ## Tests
 
-`node --test portal/server/refills.test.ts portal/server/refill-routes.test.ts` covers the threshold, the quote, approval rules, limits, expiry, duplicates, failures, restarts, receipts and the pharmacy website over HTTP.
+`node --test portal/server/refills.test.ts portal/server/refill-routes.test.ts` covers the threshold, the price finder (sorting, cents, bad prices, missing ZIP, no prices), approval rules, limits, expiry, duplicates, failures, restarts, receipts, and the endpoints over HTTP. GoodRx is faked in the tests, so they cost nothing.
 
 ## Not included
 
-There are no sign-ins yet, so "approved by" is a name the family member types, not a verified identity. Real pharmacy ordering, payment, and SMS or push notifications are out of scope: the approval appears in the care portal.
+GoodRx does not take orders, so nothing is ordered or paid for through HALO. There are no sign-ins yet, so "approved by" is a name the family member types, not a verified identity. There is no SMS or push notification: the approval appears in the care portal.

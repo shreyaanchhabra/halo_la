@@ -1,9 +1,9 @@
 import './style.css'
 import {
-  checkPrices, esc, fileUrl, loadData, loadDoses, loadPlans, loadPrices, loadRefills, onDataChanged, readPrescription, refillAction,
+  checkPrices, clearPrices, esc, fileUrl, loadData, loadDoses, loadPlans, loadPrices, loadRefills, onDataChanged, readPrescription, refillAction,
   planAction, removeFile, saveData, setDose, setRefillLimit, transcribe, uploadFile,
 } from './api'
-import { allMedicines, daysLeft, pillsLeft, refillDue, runningLow, supplyText, type MedEntry } from './meds'
+import { allMedicines, daysLeft, parseTimes, pillsLeft, refillDue, runningLow, supplyText, type MedEntry } from './meds'
 import { downloadIcs, formatTime, ymd } from './schedule'
 import { formatCents, type RefillState } from '../../shared/refill-types.ts'
 import { dateLabel, planTitle, startOfDay, timeLabel } from '../../shared/format.ts'
@@ -20,8 +20,31 @@ const APPROVER_KEY = 'halo.approver'
 const approver = () => { try { return localStorage.getItem(APPROVER_KEY) ?? '' } catch { return '' } }
 // Prescriptions and people with a request to Groq in progress
 const busy = new Set<string>()
-// Medicines whose GoodRx lookup this page already started on its own, so it only does it once
-const autoChecked = new Set<string>()
+// The medicine ("<rx>:<n>") or prescription being edited in place
+let editing: string | null = null
+
+const editMedForm = (e: MedEntry) => `
+  <form class="edit-form" data-edit-med="${esc(e.key)}">
+    <div class="row">
+      <label>Medicine <input name="name" value="${esc(e.med.name)}" required /></label>
+      <label>Strength <input name="strength" value="${esc(e.med.strength)}" /></label>
+    </div>
+    <label>Times each day <input name="times" value="${esc(e.med.times.map(formatTime).join(', '))}" placeholder="8:00 AM, 9:00 PM" required /></label>
+    <label>Instructions <input name="instructions" value="${esc(e.med.instructions)}" /></label>
+    <label>Pills in one refill <input name="quantity" type="number" min="1" step="1" value="${e.med.quantity ?? ''}" /></label>
+    <p class="hint" data-edit-error role="alert" hidden></p>
+    <div class="row"><button type="submit">Save</button><button type="button" class="secondary" data-cancel-edit>Cancel</button></div>
+  </form>`
+
+const editRxForm = (r: Prescription) => `
+  <form class="edit-form" data-edit-rx="${esc(r.id)}">
+    <div class="row">
+      <label>Prescribed by <input name="doctor" value="${esc(r.doctor)}" /></label>
+      <label>Date <input name="date" type="date" value="${esc(r.date)}" /></label>
+    </div>
+    <label>Notes <input name="notes" value="${esc(r.notes)}" /></label>
+    <div class="row"><button type="submit">Save</button><button type="button" class="secondary" data-cancel-edit>Cancel</button></div>
+  </form>`
 
 async function load() {
   ;[data, doses, prices, refillState, plans] = await Promise.all([loadData(), loadDoses(), loadPrices(), loadRefills().catch(() => null), loadPlans().catch(() => [] as Plan[])])
@@ -30,7 +53,6 @@ async function load() {
     if (document.activeElement !== input) input.value = value
   }
   render()
-  autoCheckPrices()
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`
@@ -39,7 +61,7 @@ const shortDate = (iso: string) => new Date(iso).toLocaleString(undefined, { mon
 function renderPrices(e: MedEntry) {
   const p = prices[e.key]
   if (!p) return `<p class="status">No GoodRx prices yet.</p>`
-  if (p.status === 'checking') return `<p class="status">Checking GoodRx with Browser Use… this usually takes 1 to 3 minutes.</p>`
+  if (p.status === 'checking') return `<p class="status">Checking GoodRx with Browser Use… <b data-elapsed="${esc(p.startedAt ?? '')}"></b> It usually takes 3 to 4 minutes. You can leave this page.</p>`
   if (p.status === 'failed') return `<p class="status error">GoodRx lookup failed: ${esc(p.error ?? 'unknown error')}</p>`
   const quotes = p.quotes ?? []
   return `
@@ -49,7 +71,7 @@ function renderPrices(e: MedEntry) {
         <tr><td>${esc(q.pharmacy)}</td><td>${money(q.price)}</td><td>${esc(q.priceType)}</td></tr>`).join('')}</table></div>`
         : '<p class="status">No prices found.</p>'}
       ${p.note ? `<p class="status">${esc(p.note)}</p>` : ''}
-      <p class="status">Checked ${p.checkedAt ? shortDate(p.checkedAt) : ''}${p.url ? ` · <a href="${esc(p.url)}" target="_blank" rel="noopener">Open on GoodRx</a>` : ''}</p>
+      <p class="status">Checked ${p.checkedAt ? shortDate(p.checkedAt) : ''}${p.url ? ` · <a href="${esc(p.url)}" target="_blank" rel="noopener">Open on GoodRx</a>` : ''} · <button class="link" data-hide-prices="${e.key}">Hide</button></p>
     </div>`
 }
 
@@ -79,16 +101,16 @@ function renderPlans() {
     ${upcoming.length > coming.length ? `<p class="hint">and ${upcoming.length - coming.length} more. <a href="/calendar.html">Open the full calendar</a></p>` : ''}`
 }
 
-// Refill before it runs out: what the errands agent found, and what the family can do about it
+// Refill before it runs out: the GoodRx prices the errands agent found, and what the family can do about it
 function renderRefill(e: MedEntry) {
   const days = daysLeft(e, data, doses)
   const r = refillState?.refills.find(x => x.medKey === e.key && x.status !== 'cancelled' && x.status !== 'received')
-  if (!r) return refillDue(e, data, doses) ? `<p class="refill due"><b>Refill needed:</b> about ${days} days of pills left. HALO is getting ready to look for one.</p>` : ''
+  if (!r) return refillDue(e, data, doses) ? `<p class="refill due"><b>Refill needed:</b> about ${days} days of pills left. HALO is getting ready to look up prices.</p>` : ''
 
-  const link = r.quote ? ` <a href="/test-pharmacy/cart/${esc(r.quote.cartId)}" target="_blank" rel="noopener">View on the pharmacy site</a>` : ''
+  const goodrx = r.quote?.url ? ` <a href="${esc(r.quote.url)}" target="_blank" rel="noopener">Open on GoodRx</a>` : ''
   switch (r.status) {
     case 'preparing':
-      return `<p class="refill due"><b>Refill needed:</b> about ${days} days of pills left. HALO is checking the pharmacy for a price. Nothing will be bought until you approve it.</p>`
+      return `<p class="refill due"><b>Refill needed:</b> about ${days} days of pills left. HALO is looking up GoodRx prices with Browser Use. This usually takes 1 to 3 minutes. Nothing will be bought.</p>`
     case 'awaiting_approval': {
       const q = r.quote!
       const limit = refillState!.settings.spendingLimitCents
@@ -96,37 +118,36 @@ function renderRefill(e: MedEntry) {
       const expired = Date.parse(q.expiresAt) <= Date.now()
       return `
         <div class="refill due">
-          <p><b>Refill ${esc(r.medicine)}, ${formatCents(q.priceCents)}, approve?</b></p>
-          <p>${q.quantity} tablets at ${esc(q.pharmacy)}. About ${days} days of pills left. <b>Nothing has been paid.</b> This price is good until ${esc(shortDate(q.expiresAt))}.${link}</p>
+          <p><b>Refill ${esc(r.medicine)}: ${formatCents(q.priceCents)} at ${esc(q.pharmacy)}${q.priceType ? ` (${esc(q.priceType)})` : ''}, approve?</b></p>
+          <p>${q.quantity} tablets. About ${days} days of pills left. <b>Nothing has been bought.</b> Prices checked on GoodRx until ${esc(shortDate(q.expiresAt))}.${goodrx}</p>
+          ${q.prices.length > 1 ? `<div class="table-scroll"><table>${q.prices.map((p, i) => `<tr><td>${esc(p.pharmacy)}${i === 0 ? ' <span class="tag low">Cheapest</span>' : ''}</td><td>${formatCents(p.priceCents)}</td><td>${esc(p.priceType)}</td></tr>`).join('')}</table></div>` : ''}
           ${over ? `<p class="warn">This is over your limit of ${formatCents(limit)}. Raise the limit above to approve it.</p>` : ''}
-          ${expired ? '<p class="warn">This price has expired. Get a fresh price.</p>' : ''}
+          ${expired ? '<p class="warn">These prices are out of date. Get fresh prices.</p>' : ''}
           <div class="refill-actions">
             <button data-refill-approve="${esc(r.id)}" data-price="${q.priceCents}" ${over || expired ? 'disabled' : ''}>Approve ${formatCents(q.priceCents)}</button>
             <button class="link" data-refill-reject="${esc(r.id)}">Not now</button>
-            ${expired ? `<button class="link" data-refill-requote="${esc(r.id)}">Get a fresh price</button>` : ''}
+            ${expired ? `<button class="link" data-refill-requote="${esc(r.id)}">Get fresh prices</button>` : ''}
           </div>
         </div>`
     }
-    case 'ordering':
-      return `<p class="refill ok"><b>Approved by ${esc(r.approvedBy ?? 'the family')}.</b> Placing the order with ${esc(r.quote?.pharmacy ?? 'the pharmacy')}…</p>`
-    case 'ordered':
+    case 'approved':
       return `
         <div class="refill ok">
-          <p><b>Ordered:</b> ${formatCents(r.order!.priceCents)} for ${r.quantity} tablets, approved by ${esc(r.approvedBy ?? 'the family')}. Order ${esc(r.order!.id)}.</p>
-          <p>${r.order!.method === 'delivery' ? 'Delivery' : 'Pickup'}: <b>${esc(shortDate(r.order!.readyAt))}</b>. It is on the <a href="/calendar.html">calendar</a>.</p>
+          <p><b>Approved by ${esc(r.approvedBy ?? 'the family')}:</b> get ${r.quantity} tablets at ${esc(r.quote?.pharmacy ?? 'the pharmacy')} for ${formatCents(r.quote?.priceCents ?? 0)} with the GoodRx coupon.${goodrx}</p>
+          <p>Pickup reminder: <b>${esc(shortDate(r.pickupAt!))}</b>. It is on the <a href="/calendar.html">calendar</a>; move it if you go another time. HALO does not buy anything for you.</p>
           <div class="refill-actions"><button data-refill-received="${esc(r.id)}">I have it</button></div>
         </div>`
     case 'rejected':
       return `
         <div class="refill due">
-          <p><b>Refill not requested.</b> About ${days} days of pills left. HALO will not ask again until you do.</p>
-          <div class="refill-actions"><button class="secondary" data-refill-requote="${esc(r.id)}">Get a new price</button></div>
+          <p><b>Refill not requested.</b> About ${days} days of pills left. HALO will not look again until you ask.</p>
+          <div class="refill-actions"><button class="secondary" data-refill-requote="${esc(r.id)}">Look up prices</button></div>
         </div>`
     default: // needs_review
       return `
         <div class="refill bad">
-          <p><b>A person needs to look at this refill.</b> ${esc(r.error ?? '')}</p>
-          <div class="refill-actions"><button class="secondary" data-refill-requote="${esc(r.id)}">Check the pharmacy again</button></div>
+          <p><b>HALO could not get prices.</b> ${esc(r.error ?? '')}</p>
+          <div class="refill-actions"><button class="secondary" data-refill-requote="${esc(r.id)}">Try again</button></div>
         </div>`
   }
 }
@@ -142,7 +163,7 @@ function renderRefillSettings() {
       <label>Your name, for approvals
         <input name="approver" value="${esc(approver())}" placeholder="Maya" maxlength="100" /></label>
       <button type="submit" class="secondary">Save</button>
-      <p class="hint">Errands agent: ${esc(refillState.driver)}. Every order needs a person's approval first.</p>
+      <p class="hint">Prices from: ${esc(refillState.driver)}. HALO never buys anything: you approve a price and pick it up.</p>
     </form>` : '<p class="status error">The refill service is not running.</p>'
 }
 
@@ -165,8 +186,8 @@ function renderLowSummary() {
   const open = (e: MedEntry) => refillState?.refills.find(r => r.medKey === e.key && r.status !== 'cancelled' && r.status !== 'received')
   const note = (e: MedEntry) => {
     const r = open(e)
-    if (!r) return 'getting ready to look for a refill'
-    return ({ preparing: 'checking the pharmacy', awaiting_approval: 'waiting for your approval below', ordering: 'placing the order', ordered: 'ordered, on its way', rejected: 'you said not now', needs_review: 'needs a person to look' } as Record<string, string>)[r.status] ?? ''
+    if (!r) return 'getting ready to look up prices'
+    return ({ preparing: 'looking up GoodRx prices', awaiting_approval: 'waiting for your approval below', approved: 'approved, pickup is on the calendar', rejected: 'you said not now', needs_review: 'needs a person to look' } as Record<string, string>)[r.status] ?? ''
   }
   $('low-summary').innerHTML = low.length
     ? `<div class="refill due low-summary" role="status"><p><b>Running low (${low.length}):</b></p><ul>${low.map(({ entry, supply }) => `<li><b>${esc(`${entry.med.name} ${entry.med.strength}`)}</b>: ${esc(supplyText(supply))}. Refill: ${esc(note(entry))}.</li>`).join('')}</ul></div>`
@@ -184,6 +205,7 @@ function renderMedicines() {
       const days = daysLeft(e, data, doses)
       const takenToday = doses.filter(d => d.medKey === e.key && d.slot.startsWith(today)).length
       const checking = prices[e.key]?.status === 'checking'
+      if (editing === e.key) return `<li><div>${editMedForm(e)}</div></li>`
       return `
       <li>
         <div>
@@ -196,14 +218,16 @@ function renderMedicines() {
             <button type="submit" class="secondary">Update count</button>
           </form>
           ${renderRefill(e)}
-          ${renderPrices(e)}
+          ${refillState?.refills.some(r => r.medKey === e.key && r.status !== 'cancelled' && r.status !== 'received') ? '' : renderPrices(e)}
         </div>
         <div class="actions">
           <button class="link" data-prices="${e.key}" ${checking ? 'disabled' : ''}>${prices[e.key] ? 'Check prices again' : 'Check GoodRx prices'}</button>
+          <button class="link" data-edit="${e.key}">Edit</button>
+          <button class="link" data-stop-med="${e.key}">Stop taking</button>
         </div>
       </li>`
     }).join('')
-    : '<li class="empty">No medicines yet. Upload a prescription above.</li>'
+    : '<li class="empty">No medicines yet. Upload a prescription or add a medicine by hand above.</li>'
 }
 
 async function startPriceCheck(key: string) {
@@ -217,17 +241,6 @@ async function startPriceCheck(key: string) {
   }
 }
 
-// When a refill comes due, look up prices once without waiting to be asked
-function autoCheckPrices() {
-  if (!data.patient.zip) return
-  for (const e of allMedicines(data)) {
-    if (refillDue(e, data, doses) && !prices[e.key] && !autoChecked.has(e.key)) {
-      autoChecked.add(e.key)
-      startPriceCheck(e.key)
-    }
-  }
-}
-
 function renderReading(rx: Prescription) {
   if (busy.has(rx.id)) return '<p class="status">Reading medicines…</p>'
   if (rx.readError) {
@@ -238,9 +251,9 @@ function renderReading(rx: Prescription) {
   return `
     <div class="reading">
       <h4>Medicines</h4>
-      ${r.medicines.length ? `<div class="table-scroll"><table>${r.medicines.map(m => `
+      ${r.medicines.length ? `<div class="table-scroll"><table>${r.medicines.map((m, i) => `
         <tr>
-          <td>${esc(`${m.name} ${m.strength}`)}</td>
+          <td>${esc(`${m.name} ${m.strength}`)}${m.stopped ? ` <span class="tag">Stopped</span> <button class="link" data-restart-med="${esc(rx.id)}|${i}">Start again</button>` : ''}</td>
           <td>${m.times.map(formatTime).join(', ') || 'No times found'}</td>
           <td>${esc(m.instructions)}${m.quantity != null ? ` · Qty ${m.quantity}` : ''}${m.refills != null ? ` · ${m.refills} refills` : ''}</td>
         </tr>`).join('')}</table></div>` : '<p class="status">No medicines found.</p>'}
@@ -273,17 +286,19 @@ function render() {
     ? data.prescriptions.map(r => `
       <li>
         <div>
-          <a href="${fileUrl(r.file)}" target="_blank">${esc(r.originalName)}</a>
+          ${r.file ? `<a href="${fileUrl(r.file)}" target="_blank">${esc(r.originalName)}</a>` : `<strong>${esc(r.originalName)}</strong>`}
+          ${editing === r.id ? editRxForm(r) : `
           <p>${[r.doctor, r.date].filter(Boolean).map(esc).join(' · ')}</p>
-          ${r.notes ? `<p>${esc(r.notes)}</p>` : ''}
+          ${r.notes ? `<p>${esc(r.notes)}</p>` : ''}`}
           ${renderReading(r)}
         </div>
         <div class="actions">
-          <button class="link" data-read-rx="${r.id}">${r.reading ? 'Read again' : 'Read medicines'}</button>
+          ${r.file ? `<button class="link" data-read-rx="${r.id}">${r.reading ? 'Read again' : 'Read medicines'}</button>` : ''}
+          <button class="link" data-edit="${r.id}">Edit</button>
           <button class="link" data-del-rx="${r.id}">Remove</button>
         </div>
       </li>`).join('')
-    : '<li class="empty">No prescriptions uploaded yet.</li>'
+    : '<li class="empty">No prescriptions yet.</li>'
 
   renderMedicines()
 }
@@ -441,7 +456,26 @@ document.addEventListener('click', async e => {
   const {
     delPerson, delRx, readRx: readId, transcribe: transcribeId, prices: pricesKey,
     refillApprove, refillReject, refillRequote, refillReceived, price, doseTake, doseUndo, planApprove, planReject,
+    edit, cancelEdit, stopMed, restartMed, hidePrices,
   } = (e.target as HTMLElement).dataset
+  if (hidePrices) { delete prices[hidePrices]; render(); await clearPrices(hidePrices).catch(() => {}); return }
+  if (edit) { editing = edit; return render() }
+  if (cancelEdit !== undefined) { editing = null; return render() }
+  if (stopMed) {
+    const entry = allMedicines(data).find(x => x.key === stopMed)
+    if (!entry || !confirm(`Stop ${entry.med.name}? It leaves the schedule and refills. You can start it again from the prescription.`)) return
+    entry.med.stopped = true
+    await saveData(data)
+    return render()
+  }
+  if (restartMed) {
+    const [rxId, i] = restartMed.split('|')
+    const med = data.prescriptions.find(x => x.id === rxId)?.reading?.medicines[Number(i)]
+    if (!med) return
+    delete med.stopped
+    await saveData(data)
+    return render()
+  }
   if (readId) return readRx(readId)
   if (transcribeId) return transcribePerson(transcribeId)
   if (pricesKey) return startPriceCheck(pricesKey)
@@ -473,7 +507,8 @@ document.addEventListener('click', async e => {
   } else if (delRx) {
     const r = data.prescriptions.find(x => x.id === delRx)
     data.prescriptions = data.prescriptions.filter(x => x.id !== delRx)
-    if (r) await removeFile(r.file)
+    if (data.stock) data.stock = Object.fromEntries(Object.entries(data.stock).filter(([k]) => !k.startsWith(`${delRx}:`)))
+    if (r?.file) await removeFile(r.file)
   } else {
     return
   }
@@ -505,6 +540,65 @@ document.addEventListener('submit', async e => {
   await load()
 })
 
+// Editing a medicine or a prescription in place
+document.addEventListener('submit', async e => {
+  const form = e.target as HTMLFormElement
+  const medKey = form.dataset.editMed
+  const rxId = form.dataset.editRx
+  if (!medKey && !rxId) return
+  e.preventDefault()
+  const f = new FormData(form)
+  const text = (k: string) => String(f.get(k) ?? '').trim()
+  if (medKey) {
+    const entry = allMedicines(data).find(x => x.key === medKey)
+    if (!entry) { editing = null; return render() }
+    const times = parseTimes(text('times'))
+    const error = form.querySelector<HTMLElement>('[data-edit-error]')!
+    if (!text('name')) { error.textContent = 'Enter the medicine name.'; error.hidden = false; return }
+    if (!times) { error.textContent = 'Enter times like 8:00 AM, 9:00 PM.'; error.hidden = false; return }
+    const quantity = Number(text('quantity'))
+    Object.assign(entry.med, {
+      name: text('name'), strength: text('strength'), instructions: text('instructions'), times,
+      quantity: Number.isInteger(quantity) && quantity > 0 ? quantity : null,
+    })
+    delete prices[medKey]
+    await clearPrices(medKey).catch(() => {})
+  } else {
+    const rx = data.prescriptions.find(x => x.id === rxId)
+    if (rx) Object.assign(rx, { doctor: text('doctor'), date: text('date'), notes: text('notes') })
+  }
+  editing = null
+  await saveData(data)
+  render()
+})
+
+// A medicine typed in by hand becomes a prescription of its own, so it edits and refills like the others
+$<HTMLFormElement>('med-form').addEventListener('submit', async e => {
+  e.preventDefault()
+  const val = (id: string) => $<HTMLInputElement>(id).value.trim()
+  const error = $('m-error')
+  const times = parseTimes(val('m-times'))
+  if (!times) { error.textContent = 'Enter times like 8:00 AM, 9:00 PM.'; error.hidden = false; return }
+  error.hidden = true
+  const count = val('m-count') === '' ? null : Number(val('m-count'))
+  const quantity = val('m-quantity') === '' ? count : Number(val('m-quantity'))
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
+  data.prescriptions.push({
+    id, file: '', originalName: `${val('m-name')} ${val('m-strength')}`.trim(), doctor: val('m-doctor'), date: val('m-date'), notes: '', uploadedAt: now,
+    reading: {
+      medicines: [{ name: val('m-name'), strength: val('m-strength'), form: '', instructions: val('m-instructions'), times,
+        quantity: quantity != null && Number.isInteger(quantity) && quantity > 0 ? quantity : null, refills: null }],
+      appointments: [], notes: [], readAt: now,
+    },
+  })
+  if (count != null && Number.isInteger(count) && count >= 0) data.stock = { ...data.stock, [`${id}:0`]: { count, at: now } }
+  await saveData(data)
+  ;(e.target as HTMLFormElement).reset()
+  $<HTMLDetailsElement>('add-med-box').open = false
+  render()
+})
+
 // A new pill count starts the refill cycle over
 document.addEventListener('submit', async e => {
   const form = e.target as HTMLFormElement
@@ -514,12 +608,20 @@ document.addEventListener('submit', async e => {
   const count = Number(form.querySelector('input')!.value)
   if (!Number.isInteger(count) || count < 0) return
   data.stock = { ...data.stock, [key]: { count, at: new Date().toISOString() } }
-  autoChecked.delete(key)
-  await saveData(data)
+  delete prices[key] // prices looked up for the old count no longer apply
+  await Promise.all([saveData(data), clearPrices(key).catch(() => {})])
   render()
 })
 
 // Reload when data changes elsewhere, unless a request from this page is still running
-onDataChanged(() => { if (!busy.size) load() })
+onDataChanged(() => { if (!busy.size && !editing) load() })
 
 load()
+
+// Show how long a GoodRx lookup has been running
+setInterval(() => {
+  document.querySelectorAll<HTMLElement>('[data-elapsed]').forEach(el => {
+    const s = Math.max(0, Math.round((Date.now() - Date.parse(el.dataset.elapsed ?? '')) / 1000))
+    el.textContent = Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : ''
+  })
+}, 1000)

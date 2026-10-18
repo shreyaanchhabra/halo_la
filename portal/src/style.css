@@ -99,3 +99,9 @@ button.link:disabled { opacity: 0.5; cursor: wait; }
 
 .card h3.sub { margin: 4px 0 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 #plans-card .list .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; align-items: center; align-content: flex-start; }
+
+.by-hand { border: 1px dashed var(--rule); border-radius: 8px; padding: 10px 14px; }
+.by-hand summary { cursor: pointer; font-weight: 600; }
+.by-hand form, .edit-form { display: grid; gap: 10px; margin-top: 10px; }
+.edit-form { margin: 0; }
+.by-hand[hidden], .edit-form [hidden] { display: none !important; }
