@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HALO · Messages</title></head>
+<body>
+  <header class="top"><strong>HALO</strong><span>Family · Messages</span><a href="/">Care setup</a></header>
+  <main>
+    <p id="status" role="status" aria-live="polite" hidden></p>
+    <section class="card">
+      <h2>Approved contacts</h2>
+      <p class="hint">Only approved numbers reach the glasses. Voice enrollment alone does not approve messages.</p>
+      <form id="contact-form">
+        <div class="row"><label>Name<input name="name" required maxlength="60" placeholder="Maya"></label><label>Relationship<input name="relation" required maxlength="60" placeholder="Granddaughter"></label></div>
+        <label>International phone number<input name="phone" type="tel" required placeholder="+1 202 555 0101"></label>
+        <label><span><input name="approved" type="checkbox" checked> Approve messages from this number</span></label>
+        <button>Save contact</button>
+      </form>
+      <ul id="contacts" class="list"></ul>
+    </section>
+    <section class="card"><h2>Family inbox</h2><p class="hint">Withheld messages are visible here only. Approving a contact does not release old withheld texts.</p><ul id="inbox" class="list"></ul></section>
+    <section class="card"><h2>Replies</h2><ul id="replies" class="list"></ul></section>
+    <section class="card"><h2>Activity</h2><ul id="activity" class="list"></ul></section>
+  </main>
+  <script type="module" src="/src/pages/messages/index.ts"></script>
+</body>
+</html>

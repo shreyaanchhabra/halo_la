@@ -1,0 +1,2 @@
+# Optional Browser Use driver only. The default local demo needs no Python packages.
+browser-use
