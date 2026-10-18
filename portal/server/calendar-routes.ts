@@ -3,6 +3,7 @@ import path from 'node:path'
 import type http from 'node:http'
 import { createCalendar, type Care, type Outcome } from './calendar.ts'
 import { transcribeWav } from './groq.ts'
+import { identifySpeakerWav } from './voiceid.ts'
 import { buildIcs } from '../src/schedule.ts'
 import { planTitle, whenLabel } from '../../shared/format.ts'
 
@@ -70,9 +71,18 @@ export function calendarRoutes(o: RoutesOptions) {
     if (route === 'POST /api/audio') {
       needKey()
       const c = care()
-      const text = await transcribeWav(await readBody(req), o.apiKey, { vocabulary: [...c.people.map(p => p.name), c.patient.split(' ')[0]] })
+      const wav = await readBody(req)
+      // Speaker identification is local and optional. Transcription and calendar behavior remain intact
+      // if the VoiceID sidecar is not running or cannot decide from this utterance.
+      const [text, voice] = await Promise.all([
+        transcribeWav(wav, o.apiKey, { vocabulary: [...c.people.map(p => p.name), c.patient.split(' ')[0]] }),
+        identifySpeakerWav(wav),
+      ])
       if (!text) { json(res, { kind: 'silence', text: '' }); return true }
-      json(res, describe(await cal.hear(text, String(req.headers['x-speaker'] ?? 'unknown'))))
+      const speaker = voice?.status === 'MATCH' && voice.speaker_name
+        ? voice.speaker_name
+        : String(req.headers['x-speaker'] ?? 'unknown')
+      json(res, { ...describe(await cal.hear(text, speaker)), speaker, speakerIdentity: voice })
       return true
     }
 
