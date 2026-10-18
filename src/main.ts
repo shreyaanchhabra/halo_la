@@ -14,6 +14,7 @@ import { API, getCare, getMenu, getState, markSeen, markTaken, postAudio, postWh
 import { AudioPipeline } from './audio/pipeline.ts'
 import { pressAction } from './buttons.ts'
 import type { SegmenterOptions } from './audio/segmenter.ts'
+import { GlassesMessaging } from './messaging.ts'
 import {
   buildScreen, detailScreen, layoutForDisplay, MENU, SCREEN_MARGIN_PX,
   type CareCard, type MenuPage, type Mic, type PersonCard,
@@ -70,6 +71,11 @@ let mode: Mode = { at: 'home' }
 let menu: GlassesMenu | null = null
 let menuIdle: ReturnType<typeof setTimeout> | undefined
 
+// Approved-contact messages and voice replies. Calendar questions, reminders and care cards come first.
+const messaging = new GlassesMessaging(refresh)
+let replyPipeline: AudioPipeline | null = null
+let startingReply = false
+
 const nowDate = () => new Date(Date.now() + skewMs)
 
 // ---- display --------------------------------------------------------------------------------
@@ -84,7 +90,16 @@ let wanted = ''
 let drawing = false
 
 function screen(): string {
-  if (mode.at === 'page') return layoutForDisplay(detailScreen(mode.page, menu, nowDate(), mode.index).text)
+  if (mode.at === 'page') {
+    messaging.suspend()
+    replyPipeline = null
+    return layoutForDisplay(detailScreen(mode.page, menu, nowDate(), mode.index).text)
+  }
+  const canShow = !userPaused && state && online && !state.prompt && !state.resolved && !reminder && !care && !person
+  const message = canShow ? messaging.screen() : null
+  if (message) { messaging.visible = true; return layoutForDisplay(message) }
+  messaging.suspend()
+  replyPipeline = null
   return layoutForDisplay(buildScreen({ now: nowDate(), state, online, mic: userPaused ? 'paused' : mic, reminder, notice, care, person, debug: DEBUG ? lastDebug : undefined }))
 }
 
@@ -170,7 +185,12 @@ function onAudio(raw: unknown) {
   lastAudioAt = Date.now()
   if (mic !== 'on' || userPaused) return
   const pcm = toBytes(raw)
-  if (pcm?.length) pipeline.push(pcm)
+  if (!pcm?.length) return
+  if (messaging.visible || startingReply) {
+    if (messaging.capturing) replyPipeline?.push(pcm)
+    return
+  }
+  pipeline.push(pcm)
 }
 
 async function startMic() {
@@ -206,6 +226,8 @@ const watchdog = setInterval(() => {
 }, 1000)
 
 async function stopMic() {
+  messaging.suspend()
+  replyPipeline = null
   clearTimeout(micRetry)
   pipeline.flush()
   if (MIC_INJECTED) { mic = 'off'; return }
@@ -322,6 +344,7 @@ async function poll() {
     if (view) { care = careCard(view); person = view.person ?? null }
     if (interrupting()) goHome()
     else if (mode.at === 'page') void loadMenu()
+    await messaging.poll()
   } catch (err) {
     if (++failures >= OFFLINE_AFTER_FAILURES) online = false
     if (failures === OFFLINE_AFTER_FAILURES) console.warn('[halo] server unreachable', err)
@@ -388,6 +411,22 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     else if (action === 'toggle-pause') void togglePause()
     // At home, a family message or due dose on screen is acknowledged with a tap; anything else is answered by voice
     else if (care && !interrupting()) void tapCare(care)
+    else if (messaging.visible) void messaging.click()
+    return
+  }
+  if (type === OsEventTypeList.LONG_PRESS_EVENT) {
+    if (!userPaused && messaging.visible && !startingReply) {
+      startingReply = true
+      pipeline.flush()
+      void pipeline.drained().then(async () => {
+        replyPipeline = null
+        await messaging.hold()
+        if (messaging.capturing) replyPipeline = new AudioPipeline({
+          segmenter: segmenterOverrides,
+          send: wav => messaging.audio(wav),
+        })
+      }).finally(() => { startingReply = false })
+    }
     return
   }
   switch (type) {

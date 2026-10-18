@@ -25,6 +25,7 @@ dist-ssr
 *.ehpk
 portal/data/
 portal/models/
+server/data/
 .env
 .env.*
 .halo_env

@@ -8,6 +8,7 @@ import { glassesMenu } from './server/glasses-menu'
 import { checkGoodRx } from './server/goodrx'
 import { calendarRoutes } from './server/calendar-routes.ts'
 import { refillRoutes } from './server/refill-routes.ts'
+import { messageRoutes } from './server/message-routes.ts'
 import { createImessage, formatNumber } from './server/photon'
 import { finishRequest, initCareSentry, reportError, traceCareRequest, tracePriceLookup, traceStep } from './server/sentry'
 import { createVoices } from './server/voices.ts'
@@ -161,6 +162,7 @@ function jsonStore(keys: Keys): Plugin {
         try {
           if (await calendar.handle(req, res, url)) return
           if (await refills.handle(req, res, url)) return
+          if (await messageRoutes(req, res, url, groqKey)) return
           if (url.pathname === '/api/data' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(fs.existsSync(DATA_FILE) ? fs.readFileSync(DATA_FILE) : '{}')
