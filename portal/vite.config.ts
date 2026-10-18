@@ -4,12 +4,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readPrescription, transcribe } from './server/ai'
 import { checkGoodRx } from './server/goodrx'
+import { calendarRoutes } from './server/calendar-routes.ts'
 
 const DATA_DIR = fileURLToPath(new URL('./data', import.meta.url))
 const DATA_FILE = path.join(DATA_DIR, 'halo.json')
 const UPLOADS = path.join(DATA_DIR, 'uploads')
 const TRANSCRIPTS_FILE = path.join(DATA_DIR, 'transcripts.json')
-const MAX_TRANSCRIPT_LINES = 500
 const DOSES_FILE = path.join(DATA_DIR, 'doses.json')
 const PRICES_FILE = path.join(DATA_DIR, 'prices.json')
 
@@ -41,12 +41,16 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
       // Tell open pages (care portal and patient) to reload their data
       const notify = () => server.ws.send({ type: 'custom', event: 'halo:update' })
       const upload = (name: string | null) => path.join(UPLOADS, path.basename(name ?? ''))
+      // Plans from conversation to calendar: /api/plans, /api/audio, /api/glasses/state, /api/transcripts (POST) and more
+      const calendar = calendarRoutes({ apiKey: groqKey, dataDir: DATA_DIR, notify, answerWindowMs: Number(process.env.HALO_ANSWER_WINDOW_MS) || undefined })
+      server.httpServer?.on('close', calendar.stop)
       const needKey = () => {
         if (!groqKey) throw new Error('GROQ_API_KEY is missing. Add it to portal/.env and restart the portal.')
       }
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://x')
         try {
+          if (await calendar.handle(req, res, url)) return
           if (url.pathname === '/api/data' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(fs.existsSync(DATA_FILE) ? fs.readFileSync(DATA_FILE) : '{}')
@@ -72,13 +76,6 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
           } else if (url.pathname === '/api/transcripts' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(fs.existsSync(TRANSCRIPTS_FILE) ? fs.readFileSync(TRANSCRIPTS_FILE) : '[]')
-          } else if (url.pathname === '/api/transcripts' && req.method === 'POST') {
-            const { text } = JSON.parse((await readBody(req)).toString())
-            const lines = readJson<unknown[]>(TRANSCRIPTS_FILE, [])
-            lines.push({ text: String(text), at: new Date().toISOString() })
-            writeJson(TRANSCRIPTS_FILE, lines.slice(-MAX_TRANSCRIPT_LINES))
-            notify()
-            res.end('{"ok":true}')
           } else if (url.pathname === '/api/doses' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify(readJson(DOSES_FILE, [])))
@@ -134,6 +131,6 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), '')
   return {
     plugins: [jsonStore({ groq: env.GROQ_API_KEY ?? '', browserUse: env.BROWSER_USE_API_KEY ?? '' })],
-    server: { port: 5174, watch: { ignored: ['**/data/**'] } },
+    server: { port: 5174, watch: { ignored: ['**/data/**'] }, fs: { allow: ['..'] } }, // shared/ is imported from the repo root
   }
 })

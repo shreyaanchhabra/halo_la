@@ -73,4 +73,7 @@ export type PriceCheck = {
   error?: string
 }
 
-export type TranscriptLine = { text: string; at: string }
+export type TranscriptLine = { text: string; at: string; id?: string; speaker?: string }
+
+// Plans HALO picks up from conversation (see shared/calendar.ts)
+export type { GlassesState, Plan, PlanStatus } from '../../shared/calendar.ts'

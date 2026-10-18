@@ -6,6 +6,16 @@
   "min_app_version": "2.2.10",
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
-  "permissions": [],
+  "permissions": [
+    {
+      "name": "g2-microphone",
+      "desc": "Listens for plans made in conversation (like \"I'll come Saturday at 2\") and for spoken yes or no answers."
+    },
+    {
+      "name": "network",
+      "desc": "Sends short speech clips to the HALO portal server and reads the calendar from it.",
+      "whitelist": ["http://localhost:5174"]
+    }
+  ],
   "supported_languages": ["en"]
 }

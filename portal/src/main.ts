@@ -1,6 +1,6 @@
 import './style.css'
 import {
-  checkPrices, esc, fileUrl, loadData, loadDoses, loadPrices, onDataChanged, readPrescription, removeFile, saveData,
+  checkPrices, esc, fileUrl, loadData, loadDoses, loadPlans, loadPrices, onDataChanged, readPrescription, removeFile, saveData,
   transcribe, uploadFile,
 } from './api'
 import { allMedicines, daysLeft, pillsLeft, refillDue, type MedEntry } from './meds'
@@ -217,7 +217,7 @@ $<HTMLInputElement>('patient-zip').addEventListener('change', e => {
   saveData(data)
 })
 
-$('ics-btn').addEventListener('click', () => downloadIcs(data))
+$('ics-btn').addEventListener('click', async () => downloadIcs(data, await loadPlans().catch(() => [])))
 
 // Voice recording
 const MAX_SECONDS = 30

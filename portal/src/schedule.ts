@@ -1,10 +1,11 @@
-import type { Appointment, HaloData } from './types'
+import type { Appointment, HaloData, Plan } from './types'
+import { planTitle } from '../../shared/format.ts'
 
 export type ScheduleItem = {
   time: string | null // "HH:MM", null for all-day
   title: string
   detail: string
-  kind: 'medicine' | 'appointment'
+  kind: 'medicine' | 'appointment' | 'plan'
   medKey?: string
   slot?: string // "YYYY-MM-DD HH:MM", identifies one dose
 }
@@ -22,13 +23,18 @@ export function formatTime(hhmm: string) {
 // A prescription counts from its written date, or from when it was uploaded
 const startDate = (rx: HaloData['prescriptions'][number]) => rx.date || rx.uploadedAt.slice(0, 10)
 
-export function appointments(data: HaloData): Appointment[] {
-  return data.prescriptions
-    .flatMap(rx => rx.reading?.appointments ?? [])
+const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+const confirmed = (plans: Plan[]) => plans.filter(p => p.status === 'confirmed')
+
+// Plans HALO picked up from conversation, once the patient or the family said yes
+const planAsAppointment = (p: Plan): Appointment => ({ title: planTitle(p), date: ymd(new Date(p.start)), time: p.allDay ? null : hhmm(new Date(p.start)) })
+
+export function appointments(data: HaloData, plans: Plan[] = []): Appointment[] {
+  return [...data.prescriptions.flatMap(rx => rx.reading?.appointments ?? []), ...confirmed(plans).map(planAsAppointment)]
     .sort((a, b) => `${a.date} ${a.time ?? ''}`.localeCompare(`${b.date} ${b.time ?? ''}`))
 }
 
-export function scheduleFor(data: HaloData, day: Date): ScheduleItem[] {
+export function scheduleFor(data: HaloData, day: Date, plans: Plan[] = []): ScheduleItem[] {
   const date = ymd(day)
   const items: ScheduleItem[] = []
 
@@ -46,6 +52,12 @@ export function scheduleFor(data: HaloData, day: Date): ScheduleItem[] {
   for (const a of appointments(data)) {
     if (a.date === date) items.push({ time: a.time, title: a.title, detail: 'Appointment', kind: 'appointment' })
   }
+  for (const p of confirmed(plans)) {
+    if (ymd(new Date(p.start)) === date) {
+      const a = planAsAppointment(p)
+      items.push({ time: a.time, title: a.title, detail: p.confirmedBy === 'patient' ? 'You said yes to this' : 'Added by your family', kind: 'plan' })
+    }
+  }
   return items.sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''))
 }
 
@@ -55,7 +67,7 @@ const icsText = (s: string) => s.replace(/\\/g, '\\\\').replace(/[,;]/g, m => `\
 const icsDate = (date: string) => date.replace(/-/g, '')
 const icsDateTime = (date: string, time: string) => `${icsDate(date)}T${time.replace(':', '')}00`
 
-export function buildIcs(data: HaloData): string {
+export function buildIcs(data: HaloData, plans: Plan[] = []): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '')
   const who = data.patient.name ? ` (${data.patient.name})` : ''
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//HALO//Care Portal//EN', `X-WR-CALNAME:HALO${who}`]
@@ -92,12 +104,26 @@ export function buildIcs(data: HaloData): string {
       )
     })
   }
+  for (const p of confirmed(plans)) {
+    const a = planAsAppointment(p)
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${p.id}@halo`,
+      `DTSTAMP:${stamp}`,
+      a.time ? `DTSTART:${icsDateTime(a.date, a.time)}` : `DTSTART;VALUE=DATE:${icsDate(a.date)}`,
+      a.time ? 'DURATION:PT1H' : 'DURATION:P1D',
+      `SUMMARY:${icsText(a.title)}`,
+      ...(p.source ? [`DESCRIPTION:${icsText(`HALO heard: "${p.source.quote}"`)}`] : []),
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(a.title)}`, 'TRIGGER:-PT1H', 'END:VALARM',
+      'END:VEVENT',
+    )
+  }
   lines.push('END:VCALENDAR')
   return lines.join('\r\n') + '\r\n'
 }
 
-export function downloadIcs(data: HaloData) {
-  const url = URL.createObjectURL(new Blob([buildIcs(data)], { type: 'text/calendar' }))
+export function downloadIcs(data: HaloData, plans: Plan[] = []) {
+  const url = URL.createObjectURL(new Blob([buildIcs(data, plans)], { type: 'text/calendar' }))
   const a = Object.assign(document.createElement('a'), { href: url, download: 'halo-calendar.ics' })
   a.click()
   URL.revokeObjectURL(url)
