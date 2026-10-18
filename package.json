@@ -10,7 +10,9 @@
     "sim": "evenhub-simulator http://localhost:5173",
     "qr": "evenhub qr --clear && evenhub qr --http --ip $(ipconfig getifaddr en0) --port 5173",
     "pack": "npm run build && evenhub pack app.json dist",
-    "portal": "vite portal"
+    "portal": "vite portal",
+    "test": "node --test \"portal/server/**/*.test.ts\" \"portal/src/**/*.test.ts\" \"shared/**/*.test.ts\" \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p portal && tsc --noEmit -p portal/server"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.14",
@@ -22,6 +24,7 @@
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.16",
-    "browser-use-sdk": "^3.12.1"
+    "browser-use-sdk": "^3.12.1",
+    "chrono-node": "^2.10.3"
   }
 }

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HALO Calendar</title>
+  </head>
+  <body>
+    <header class="top">
+      <strong>HALO</strong>
+      <span>Care portal · Calendar</span>
+      <nav>
+        <a href="/">Setup</a>
+        <a href="/patient.html" target="_blank">Open patient portal ↗</a>
+      </nav>
+    </header>
+
+    <main class="wide">
+      <div id="cal-status"></div>
+      <section class="card" id="needs" hidden></section>
+      <section class="card" id="calendar"></section>
+      <section class="card" id="add"></section>
+      <section class="card" id="sync"></section>
+      <section class="card" id="presence"></section>
+      <section class="card" id="conversation"></section>
+    </main>
+
+    <script type="module" src="/src/calendar.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,64 @@
+/* Calendar page: month grid, needs-approval list, adding, syncing, trying it out */
+main.wide { max-width: 980px; }
+.card h3 { margin: 4px 0 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.card code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+.muted { color: var(--muted); font-weight: 400; }
+.banner { background: #fbf1dc; border-left: 3px solid #8a5a00; color: #5c3c00; padding: 10px 14px; border-radius: 4px; font-size: 0.9rem; }
+
+.month-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.month-head h2 { flex: 1; min-width: 9rem; }
+.month-head button { padding: 7px 12px; }
+
+.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.grid .dow { background: var(--bg); padding: 6px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); text-align: center; }
+.day { all: unset; box-sizing: border-box; cursor: pointer; background: var(--card); min-height: 92px; padding: 6px; display: grid; gap: 3px; align-content: start; min-width: 0; }
+.day:hover { background: #f6fafc; }
+.day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.day.out { background: #fafbfc; color: #9aa7b0; }
+.day.sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.day .n { font-size: 0.85rem; font-weight: 600; justify-self: start; min-width: 1.6em; text-align: center; border-radius: 999px; }
+.day.today .n { background: var(--accent); color: #fff; }
+.chip { display: block; font-size: 0.72rem; line-height: 1.25; padding: 1px 5px; border-radius: 4px; background: #dcebf2; color: #123a4d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.pending { background: #fff; border: 1px dashed #8a5a00; color: #5c3c00; }
+.chip.appt { background: #e8e4f2; color: #3d3366; }
+.more { font-size: 0.7rem; color: var(--muted); }
+@media (max-width: 640px) {
+  .day { min-height: 56px; padding: 4px; }
+  .chip { font-size: 0; padding: 0; height: 6px; width: 6px; border-radius: 999px; display: inline-block; margin-right: 2px; }
+  .chip.pending { border-width: 1px; }
+  .more { display: none; }
+}
+
+.ev p { margin: 0; }
+.ev .time { display: inline-block; min-width: 4.6em; font-variant-numeric: tabular-nums; }
+.ev.past { opacity: 0.55; }
+.ev.need { background: #f6fafc; margin: 0 -8px; padding: 12px 8px; border-radius: 6px; }
+.ev .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev .tags:empty { display: none; }
+.ev .quote { font-size: 0.88rem; color: var(--muted); }
+.ev .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; align-content: flex-start; justify-content: flex-end; }
+.ev a { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+.tag.warn { color: #8a5a00; background: #fbf1dc; border-color: #e7d3a4; }
+
+form.edit { display: grid; gap: 10px; width: 100%; }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; align-self: end; padding-bottom: 8px; }
+label.check input { width: auto; }
+select { font: inherit; color: var(--ink); padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); }
+a.button { font-weight: 600; padding: 9px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; text-decoration: none; }
+details summary { cursor: pointer; }
+details[hidden] { display: none; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chipbtn { background: var(--card); color: var(--ink); border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; font-weight: 600; }
+.chipbtn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chipbtn.on .muted { color: #d8e8ef; }
+
+.say { display: grid; grid-template-columns: minmax(0, 11rem) 1fr auto; gap: 12px; align-items: end; }
+@media (max-width: 620px) { .say { grid-template-columns: 1fr; } }
+.transcript li { display: block; font-size: 0.92rem; border-radius: 4px; }
+.transcript li.flash { background: #fff3c4; transition: background 0.4s; }
+
+/* The card style sets display:grid, which would otherwise override the hidden attribute */
+[hidden] { display: none !important; }
+.hint .chip { display: inline-block; padding: 1px 8px; margin-right: 6px; }
