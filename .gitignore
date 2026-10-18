@@ -26,3 +26,4 @@ dist-ssr
 portal/data/
 .env
 .env.*
+.halo_env
