@@ -56,3 +56,21 @@ audio { width: 100%; max-width: 360px; }
 .list p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 .list .empty { color: var(--muted); font-size: 0.9rem; }
 .tag { font-size: 0.75rem; background: var(--bg); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 6px; color: var(--muted); }
+
+.top nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.top a { color: var(--accent); font-weight: 600; }
+button.secondary { background: var(--card); color: var(--accent); }
+.top { flex-wrap: wrap; }
+
+.reading { display: grid; gap: 8px; padding: 10px 12px; background: var(--bg); border-radius: 6px; font-size: 0.9rem; }
+.reading h4 { margin: 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.reading table { border-collapse: collapse; width: 100%; }
+.reading td { padding: 4px 8px 4px 0; vertical-align: top; border-top: 1px solid var(--rule); }
+.reading td:first-child { font-weight: 600; white-space: nowrap; }
+.reading ul { margin: 0; padding-left: 18px; }
+.table-scroll { overflow-x: auto; }
+.status { color: var(--muted); font-size: 0.9rem; }
+.status.error { color: #a12a2a; }
+details { font-size: 0.9rem; color: var(--muted); }
+summary { cursor: pointer; }
+.list .actions { display: grid; gap: 8px; justify-items: end; align-content: start; }

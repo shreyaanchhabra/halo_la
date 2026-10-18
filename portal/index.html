@@ -9,6 +9,10 @@
     <header class="top">
       <strong>HALO</strong>
       <span>Care portal · Setup</span>
+      <nav>
+        <button type="button" id="ics-btn" class="secondary">Add to calendar (.ics)</button>
+        <a href="/patient.html" target="_blank">Open patient portal ↗</a>
+      </nav>
     </header>
 
     <main>
@@ -45,9 +49,9 @@
 
       <section class="card">
         <h2>Prescriptions</h2>
-        <p class="hint">Upload a photo or PDF of each prescription.</p>
+        <p class="hint">Upload a photo or PDF of each prescription. HALO reads the medicines, dose times and appointments from it. Check what it read before relying on it.</p>
         <form id="rx-form">
-          <label>File <input id="rx-file" type="file" accept="image/*,application/pdf" required /></label>
+          <label>File <input id="rx-file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required /></label>
           <div class="row">
             <label>Prescribed by <input id="rx-doctor" placeholder="Dr. Patel" /></label>
             <label>Date <input id="rx-date" type="date" /></label>

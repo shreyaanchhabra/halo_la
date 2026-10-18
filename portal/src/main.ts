@@ -1,55 +1,44 @@
 import './style.css'
-
-type Person = {
-  id: string
-  name: string
-  relation: string
-  blurb: string
-  voiceFile: string
-  createdAt: string
-}
-
-type Prescription = {
-  id: string
-  file: string
-  originalName: string
-  doctor: string
-  date: string
-  notes: string
-  uploadedAt: string
-}
-
-type HaloData = {
-  patient: { name: string }
-  people: Person[]
-  prescriptions: Prescription[]
-}
+import {
+  esc, fileUrl, loadData, onDataChanged, readPrescription, removeFile, saveData, transcribe, uploadFile,
+} from './api'
+import { downloadIcs, formatTime } from './schedule'
+import type { HaloData, Prescription } from './types'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 let data: HaloData = { patient: { name: '' }, people: [], prescriptions: [] }
+// Prescriptions and people with a request to Groq in progress
+const busy = new Set<string>()
 
 async function load() {
-  const saved = await (await fetch('/api/data')).json()
-  data = { ...data, ...saved }
-  $<HTMLInputElement>('patient-name').value = data.patient.name
+  data = await loadData()
+  const nameInput = $<HTMLInputElement>('patient-name')
+  if (document.activeElement !== nameInput) nameInput.value = data.patient.name
   render()
 }
 
-async function save() {
-  await fetch('/api/data', { method: 'PUT', body: JSON.stringify(data) })
+function renderReading(rx: Prescription) {
+  if (busy.has(rx.id)) return '<p class="status">Reading medicines…</p>'
+  if (rx.readError) {
+    return `<p class="status error">${esc(rx.readError)}</p>`
+  }
+  const r = rx.reading
+  if (!r) return '<p class="status">Not read yet.</p>'
+  return `
+    <div class="reading">
+      <h4>Medicines</h4>
+      ${r.medicines.length ? `<div class="table-scroll"><table>${r.medicines.map(m => `
+        <tr>
+          <td>${esc(`${m.name} ${m.strength}`)}</td>
+          <td>${m.times.map(formatTime).join(', ') || 'No times found'}</td>
+          <td>${esc(m.instructions)}${m.quantity != null ? ` · Qty ${m.quantity}` : ''}${m.refills != null ? ` · ${m.refills} refills` : ''}</td>
+        </tr>`).join('')}</table></div>` : '<p class="status">No medicines found.</p>'}
+      ${r.appointments.length ? `<h4>Appointments</h4><ul>${r.appointments.map(a =>
+        `<li>${esc(a.title)}: ${esc(a.date)}${a.time ? ` at ${formatTime(a.time)}` : ''}</li>`).join('')}</ul>` : ''}
+      ${r.notes.length ? `<h4>Care plan notes</h4><ul>${r.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+    </div>`
 }
-
-async function upload(blob: Blob, name: string): Promise<string> {
-  const res = await fetch(`/api/upload?name=${encodeURIComponent(name)}`, { method: 'POST', body: blob })
-  return (await res.json()).file
-}
-
-async function removeFile(file: string) {
-  await fetch(`/api/files/${encodeURIComponent(file)}`, { method: 'DELETE' })
-}
-
-const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 
 function render() {
   $('people').innerHTML = data.people.length
@@ -58,9 +47,14 @@ function render() {
         <div>
           <strong>${esc(p.name)}</strong> <span class="tag">${esc(p.relation)}</span>
           ${p.blurb ? `<p>${esc(p.blurb)}</p>` : ''}
-          <audio controls src="/api/files/${encodeURIComponent(p.voiceFile)}"></audio>
+          <audio controls src="${fileUrl(p.voiceFile)}"></audio>
+          ${busy.has(p.id) ? '<p class="status">Transcribing…</p>'
+            : p.transcript ? `<details><summary>What they said</summary>${esc(p.transcript)}</details>` : ''}
         </div>
-        <button class="link" data-del-person="${p.id}">Remove</button>
+        <div class="actions">
+          <button class="link" data-transcribe="${p.id}">${p.transcript ? 'Transcribe again' : 'Transcribe'}</button>
+          <button class="link" data-del-person="${p.id}">Remove</button>
+        </div>
       </li>`).join('')
     : '<li class="empty">No one added yet.</li>'
 
@@ -68,20 +62,57 @@ function render() {
     ? data.prescriptions.map(r => `
       <li>
         <div>
-          <a href="/api/files/${encodeURIComponent(r.file)}" target="_blank">${esc(r.originalName)}</a>
+          <a href="${fileUrl(r.file)}" target="_blank">${esc(r.originalName)}</a>
           <p>${[r.doctor, r.date].filter(Boolean).map(esc).join(' · ')}</p>
           ${r.notes ? `<p>${esc(r.notes)}</p>` : ''}
+          ${renderReading(r)}
         </div>
-        <button class="link" data-del-rx="${r.id}">Remove</button>
+        <div class="actions">
+          <button class="link" data-read-rx="${r.id}">${r.reading ? 'Read again' : 'Read medicines'}</button>
+          <button class="link" data-del-rx="${r.id}">Remove</button>
+        </div>
       </li>`).join('')
     : '<li class="empty">No prescriptions uploaded yet.</li>'
+}
+
+async function readRx(id: string) {
+  const rx = data.prescriptions.find(r => r.id === id)
+  if (!rx) return
+  busy.add(id)
+  render()
+  try {
+    rx.reading = await readPrescription(rx.file)
+    delete rx.readError
+  } catch (err) {
+    rx.readError = `Couldn't read this prescription: ${(err as Error).message}`
+  }
+  busy.delete(id)
+  await saveData(data)
+  render()
+}
+
+async function transcribePerson(id: string) {
+  const person = data.people.find(p => p.id === id)
+  if (!person) return
+  busy.add(id)
+  render()
+  try {
+    person.transcript = await transcribe(person.voiceFile)
+  } catch (err) {
+    recStatus.textContent = (`Couldn't transcribe ${person.name}'s recording: ${(err as Error).message}`)
+  }
+  busy.delete(id)
+  await saveData(data)
+  render()
 }
 
 // Patient
 $<HTMLInputElement>('patient-name').addEventListener('change', e => {
   data.patient.name = (e.target as HTMLInputElement).value.trim()
-  save()
+  saveData(data)
 })
+
+$('ics-btn').addEventListener('click', () => downloadIcs(data))
 
 // Voice recording
 const MAX_SECONDS = 30
@@ -147,20 +178,21 @@ $<HTMLFormElement>('person-form').addEventListener('submit', async e => {
   saveBtn.disabled = true
   const name = $<HTMLInputElement>('p-name').value.trim()
   const ext = recording.type.includes('mp4') ? 'mp4' : 'webm'
-  const voiceFile = await upload(recording, `${name || 'voice'}.${ext}`)
+  const id = crypto.randomUUID()
   data.people.push({
-    id: crypto.randomUUID(),
+    id,
     name,
     relation: $<HTMLInputElement>('p-relation').value.trim(),
     blurb: $<HTMLTextAreaElement>('p-blurb').value.trim(),
-    voiceFile,
+    voiceFile: await uploadFile(recording, `${name || 'voice'}.${ext}`),
     createdAt: new Date().toISOString(),
   })
-  await save()
+  await saveData(data)
   ;(e.target as HTMLFormElement).reset()
   resetRecording()
   saveBtn.disabled = false
   render()
+  transcribePerson(id)
 })
 
 // Prescriptions
@@ -170,39 +202,43 @@ $<HTMLFormElement>('rx-form').addEventListener('submit', async e => {
   if (!file) return
   const saveBtn = $<HTMLButtonElement>('rx-save')
   saveBtn.disabled = true
+  const id = crypto.randomUUID()
   data.prescriptions.push({
-    id: crypto.randomUUID(),
-    file: await upload(file, file.name),
+    id,
+    file: await uploadFile(file, file.name),
     originalName: file.name,
     doctor: $<HTMLInputElement>('rx-doctor').value.trim(),
     date: $<HTMLInputElement>('rx-date').value,
     notes: $<HTMLInputElement>('rx-notes').value.trim(),
     uploadedAt: new Date().toISOString(),
   })
-  await save()
+  await saveData(data)
   ;(e.target as HTMLFormElement).reset()
   saveBtn.disabled = false
-  render()
+  readRx(id)
 })
 
-// Remove buttons
+// List buttons
 document.addEventListener('click', async e => {
-  const el = e.target as HTMLElement
-  const personId = el.dataset.delPerson
-  const rxId = el.dataset.delRx
-  if (personId) {
-    const p = data.people.find(x => x.id === personId)
-    data.people = data.people.filter(x => x.id !== personId)
+  const { delPerson, delRx, readRx: readId, transcribe: transcribeId } = (e.target as HTMLElement).dataset
+  if (readId) return readRx(readId)
+  if (transcribeId) return transcribePerson(transcribeId)
+  if (delPerson) {
+    const p = data.people.find(x => x.id === delPerson)
+    data.people = data.people.filter(x => x.id !== delPerson)
     if (p) await removeFile(p.voiceFile)
-  } else if (rxId) {
-    const r = data.prescriptions.find(x => x.id === rxId)
-    data.prescriptions = data.prescriptions.filter(x => x.id !== rxId)
+  } else if (delRx) {
+    const r = data.prescriptions.find(x => x.id === delRx)
+    data.prescriptions = data.prescriptions.filter(x => x.id !== delRx)
     if (r) await removeFile(r.file)
   } else {
     return
   }
-  await save()
+  await saveData(data)
   render()
 })
+
+// Reload when data changes elsewhere, unless a request from this page is still running
+onDataChanged(() => { if (!busy.size) load() })
 
 load()

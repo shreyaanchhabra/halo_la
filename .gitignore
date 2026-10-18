@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 *.ehpk
 portal/data/
+.env
+.env.*
