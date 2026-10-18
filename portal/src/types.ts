@@ -46,15 +46,12 @@ export type Prescription = {
 // Pills on hand as counted by the family, at a point in time
 export type Stock = { count: number; at: string }
 
-export type Refill = { status: 'approved' | 'dismissed'; at: string; pharmacy?: string; price?: number }
-
 export type HaloData = {
   patient: { name: string; zip?: string }
   people: Person[]
   prescriptions: Prescription[]
   // Keyed by medicine key ("<prescription id>:<index>")
   stock?: Record<string, Stock>
-  refills?: Record<string, Refill>
 }
 
 export type DoseLog = { medKey: string; slot: string; at: string } // slot: "YYYY-MM-DD HH:MM"

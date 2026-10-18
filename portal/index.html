@@ -17,6 +17,8 @@
     </header>
 
     <main>
+      <section class="card" id="plans-card"></section>
+
       <section class="card">
         <h2>Patient</h2>
         <div class="row">
@@ -68,7 +70,9 @@
       </section>
       <section class="card">
         <h2>Medicines</h2>
-        <p class="hint">From the prescriptions above. Pill counts go down when the patient taps "I took it". HALO flags a refill when about 7 days are left and looks up GoodRx prices with Browser Use. No order is placed.</p>
+        <p class="hint">From the prescriptions above. Pill counts go down when the patient taps "I took it". When about 7 days are left, HALO's errands agent shops on the pharmacy website and stops before paying. You approve the price, and only then is the order placed. The pickup goes on the calendar.</p>
+        <div id="low-summary"></div>
+        <div id="refill-settings"></div>
         <ul id="medicines" class="list"></ul>
       </section>
     </main>

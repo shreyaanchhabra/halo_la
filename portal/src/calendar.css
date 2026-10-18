@@ -5,30 +5,6 @@ main.wide { max-width: 980px; }
 .muted { color: var(--muted); font-weight: 400; }
 .banner { background: #fbf1dc; border-left: 3px solid #8a5a00; color: #5c3c00; padding: 10px 14px; border-radius: 4px; font-size: 0.9rem; }
 
-.month-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.month-head h2 { flex: 1; min-width: 9rem; }
-.month-head button { padding: 7px 12px; }
-
-.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
-.grid .dow { background: var(--bg); padding: 6px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); text-align: center; }
-.day { all: unset; box-sizing: border-box; cursor: pointer; background: var(--card); min-height: 92px; padding: 6px; display: grid; gap: 3px; align-content: start; min-width: 0; }
-.day:hover { background: #f6fafc; }
-.day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.day.out { background: #fafbfc; color: #9aa7b0; }
-.day.sel { box-shadow: inset 0 0 0 2px var(--accent); }
-.day .n { font-size: 0.85rem; font-weight: 600; justify-self: start; min-width: 1.6em; text-align: center; border-radius: 999px; }
-.day.today .n { background: var(--accent); color: #fff; }
-.chip { display: block; font-size: 0.72rem; line-height: 1.25; padding: 1px 5px; border-radius: 4px; background: #dcebf2; color: #123a4d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip.pending { background: #fff; border: 1px dashed #8a5a00; color: #5c3c00; }
-.chip.appt { background: #e8e4f2; color: #3d3366; }
-.more { font-size: 0.7rem; color: var(--muted); }
-@media (max-width: 640px) {
-  .day { min-height: 56px; padding: 4px; }
-  .chip { font-size: 0; padding: 0; height: 6px; width: 6px; border-radius: 999px; display: inline-block; margin-right: 2px; }
-  .chip.pending { border-width: 1px; }
-  .more { display: none; }
-}
-
 .ev p { margin: 0; }
 .ev .time { display: inline-block; min-width: 4.6em; font-variant-numeric: tabular-nums; }
 .ev.past { opacity: 0.55; }

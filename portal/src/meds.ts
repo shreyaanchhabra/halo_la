@@ -1,4 +1,4 @@
-import { medKey } from './schedule'
+import { medKey } from './schedule.ts'
 import type { DoseLog, HaloData, Medicine, Prescription } from './types'
 
 export const REFILL_DAYS = 7
@@ -29,4 +29,23 @@ export function daysLeft(entry: MedEntry, data: HaloData, doses: DoseLog[]): num
 export function refillDue(entry: MedEntry, data: HaloData, doses: DoseLog[]): boolean {
   const days = daysLeft(entry, data, doses)
   return days != null && days <= REFILL_DAYS
+}
+
+// How much of a medicine is left, in the words both pages use
+export type Supply = { left: number; days: number | null; low: boolean }
+
+export function supply(entry: MedEntry, data: HaloData, doses: DoseLog[]): Supply | null {
+  const left = pillsLeft(entry, data, doses)
+  if (left == null) return null
+  return { left, days: daysLeft(entry, data, doses), low: refillDue(entry, data, doses) }
+}
+
+export const supplyText = (s: Supply) => `${s.left} ${s.left === 1 ? 'pill' : 'pills'} left${s.days != null ? ` (about ${s.days} ${s.days === 1 ? 'day' : 'days'})` : ''}`
+
+// Every medicine that is running low, fewest days first
+export function runningLow(data: HaloData, doses: DoseLog[]): { entry: MedEntry; supply: Supply }[] {
+  return allMedicines(data)
+    .map(entry => ({ entry, supply: supply(entry, data, doses) }))
+    .filter((x): x is { entry: MedEntry; supply: Supply } => x.supply != null && x.supply.low)
+    .sort((a, b) => (a.supply.days ?? 0) - (b.supply.days ?? 0))
 }

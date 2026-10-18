@@ -1,3 +1,4 @@
+import type { RefillState } from '../../shared/refill-types.ts'
 import type { DoseLog, GlassesState, HaloData, Medicine, Plan, PriceCheck, PrescriptionReading, TranscriptLine } from './types'
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -65,3 +66,10 @@ export function onDataChanged(cb: () => void) {
 }
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
+
+// ---- Refills ----
+export const loadRefills = () => call<RefillState>('/api/refills')
+export const refillAction = (id: string, op: 'approve' | 'reject' | 'requote' | 'received', body: object = {}) =>
+  call(`/api/refills/${id}/${op}`, { method: 'POST', body: JSON.stringify(body) })
+export const setRefillLimit = (spendingLimitCents: number) =>
+  call('/api/refills/settings', { method: 'PUT', body: JSON.stringify({ spendingLimitCents }) })

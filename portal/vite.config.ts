@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { readPrescription, transcribe } from './server/ai'
 import { checkGoodRx } from './server/goodrx'
 import { calendarRoutes } from './server/calendar-routes.ts'
+import { refillRoutes } from './server/refill-routes.ts'
 
 const DATA_DIR = fileURLToPath(new URL('./data', import.meta.url))
 const DATA_FILE = path.join(DATA_DIR, 'halo.json')
@@ -44,6 +45,9 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
       // Plans from conversation to calendar: /api/plans, /api/audio, /api/glasses/state, /api/transcripts (POST) and more
       const calendar = calendarRoutes({ apiKey: groqKey, dataDir: DATA_DIR, notify, answerWindowMs: Number(process.env.HALO_ANSWER_WINDOW_MS) || undefined })
       server.httpServer?.on('close', calendar.stop)
+      // Refill before it runs out: pill count -> errands agent -> family approval -> order -> pickup on the calendar
+      const refills = refillRoutes({ dataDir: DATA_DIR, notify, calendar: calendar.cal, browserUseKey: keys.browserUse, siteUrl: process.env.HALO_PHARMACY_URL })
+      server.httpServer?.on('close', refills.stop)
       const needKey = () => {
         if (!groqKey) throw new Error('GROQ_API_KEY is missing. Add it to portal/.env and restart the portal.')
       }
@@ -51,12 +55,14 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
         const url = new URL(req.url ?? '/', 'http://x')
         try {
           if (await calendar.handle(req, res, url)) return
+          if (await refills.handle(req, res, url)) return
           if (url.pathname === '/api/data' && req.method === 'GET') {
             res.setHeader('Content-Type', 'application/json')
             res.end(fs.existsSync(DATA_FILE) ? fs.readFileSync(DATA_FILE) : '{}')
           } else if (url.pathname === '/api/data' && req.method === 'PUT') {
             const data = JSON.parse((await readBody(req)).toString())
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2))
+            refills.check() // a new pill count or prescription can start or cancel a refill
             notify()
             res.end('{"ok":true}')
           } else if (url.pathname === '/api/upload' && req.method === 'POST') {
@@ -86,6 +92,7 @@ function jsonStore(keys: { groq: string; browserUse: string }): Plugin {
               .filter(d => !(d.medKey === medKey && d.slot === slot))
             if (taken !== false) doses.push({ medKey: String(medKey), slot: String(slot), at: new Date().toISOString() })
             writeJson(DOSES_FILE, doses)
+            refills.check() // a dose can take the pill count down to 7 days
             notify()
             res.end('{"ok":true}')
           } else if (url.pathname === '/api/prices' && req.method === 'GET') {
